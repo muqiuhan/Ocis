@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Memtbl.fs" />
+    <Compile Include="SSTbl.fs" />
+    <Compile Include="Valog.fs" />
+    <Compile Include="WAL.fs" />
+    <Compile Include="Library.fs" />
+  </ItemGroup>
+</Project>
