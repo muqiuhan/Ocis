@@ -1,4 +1,4 @@
-﻿module Ocis
+﻿module Ocis.WiscKey
 
 open System.Collections.Concurrent
 open Ocis.Memtbl

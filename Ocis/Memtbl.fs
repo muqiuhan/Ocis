@@ -70,6 +70,13 @@ type Memtbl() =
             memtbl.GetEnumerator() :> Collections.IEnumerator
 
     /// <summary>
+    /// Add or update a key-value pair in Memtbl.
+    /// </summary>
+    /// <param name="key">The key to add or update.</param>
+    /// <param name="valueLocation">The value location to associate with the key.</param>
+    member this.Add(key: byte array, valueLocation: ValueLocation) : unit = memtbl.[key] <- valueLocation
+
+    /// <summary>
     /// Get the value location of the given key from Memtbl.
     /// </summary>
     /// <param name="key">The key to find.</param>
@@ -90,12 +97,16 @@ type Memtbl() =
     /// </summary>
     /// <param name="key">The key to delete.</param>
     /// <returns>The updated Memtbl instance, which contains a deletion marker record.</returns>
-    member this.Delete(key: byte array) : Memtbl =
+    member this.SafeDelete(key: byte array) : unit =
         match this.TryGet(key) with
         | Some _ ->
             match memtbl.Remove(key) with
-            | true ->
-                memtbl.Add(key, -1L)
-                this
+            | true -> memtbl.Add(key, -1L)
             | false -> failwith "Failed to delete key"
         | None -> failwith "Key not found"
+
+    /// <summary>
+    /// Delete a key from Memtbl.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    member this.Delete(key: byte array) : unit = memtbl.[key] <- -1L
