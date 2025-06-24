@@ -1,4 +1,4 @@
-﻿module Ocis.Tests
+﻿module Ocis.Tests.Memtbl
 
 open NUnit.Framework
 open Ocis.Memtbl

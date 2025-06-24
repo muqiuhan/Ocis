@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Memtbl.fs" />
+    <Compile Include="SSTbl.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
