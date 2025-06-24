@@ -10,15 +10,15 @@ open System
 [<TestFixture>]
 type SSTblTests() =
 
-    let tempDir = "temp_sstbl_tests" // 临时目录名
-    let mutable testFilePath = "" // 当前测试文件路径
+    let tempDir = "temp_sstbl_tests"
+    let mutable testFilePath = ""
 
     // Helper function to create a Memtbl with some data
     let createMemtbl (count: int) =
         let memtbl = Memtbl()
 
         for i = 0 to count - 1 do
-            let key = Encoding.UTF8.GetBytes($"key{i:D4}") // 例如 "key0000", "key0001"
+            let key = Encoding.UTF8.GetBytes($"key{i:D4}")
             let value = int64 i
             memtbl.Add(key, value)
 
@@ -26,7 +26,7 @@ type SSTblTests() =
 
     [<SetUp>]
     member this.Setup() =
-        // 为每个测试创建一个新的临时目录和文件路径
+        // create a new temporary directory and file path for each test
         if Directory.Exists(tempDir) then
             Directory.Delete(tempDir, true)
 
@@ -35,7 +35,7 @@ type SSTblTests() =
 
     [<TearDown>]
     member this.TearDown() =
-        // 清理临时目录和文件
+        // clean up the temporary directory and file
         if Directory.Exists(tempDir) then
             Directory.Delete(tempDir, true)
 
@@ -45,13 +45,13 @@ type SSTblTests() =
         let timestamp = 123456789L
         let level = 0
 
-        // 执行 Flush
+        // execute Flush
         let filePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
 
-        // 验证文件是否存在
+        // verify the file exists
         Assert.That(File.Exists(filePath), Is.True, "SSTable file should be created.")
 
-        // 打开 SSTable 并验证内容
+        // open SSTable and verify the content
         use sstbl =
             match SSTbl.Open(filePath) with
             | Some s -> s
@@ -61,15 +61,15 @@ type SSTblTests() =
         Assert.That(sstbl.Level, Is.EqualTo(level), "Level should match.")
         Assert.That(sstbl.RecordOffsets.Length, Is.EqualTo(5), "RecordOffsets count should match Memtbl size.")
 
-        // 验证 LowKey 和 HighKey
+        // verify LowKey and HighKey
         Assert.That(Encoding.UTF8.GetString(sstbl.LowKey), Is.EqualTo("key0000"), "LowKey should be correct.")
         Assert.That(Encoding.UTF8.GetString(sstbl.HighKey), Is.EqualTo("key0004"), "HighKey should be correct.")
 
-        // 验证通过 TryGet 读取的数据
+        // verify the data read through TryGet
         for i = 0 to 4 do
             let key = Encoding.UTF8.GetBytes($"key{i:D4}")
             let expectedValue = int64 i
-            let actualValue = SSTbl.TryGet(sstbl, key)
+            let actualValue = sstbl.TryGet(key)
             Assert.That(actualValue.IsSome, Is.True, $"Key {Encoding.UTF8.GetString(key)} should be found.")
 
             Assert.That(
@@ -80,7 +80,7 @@ type SSTblTests() =
 
     [<Test>]
     member this.``Flush_ShouldHandleEmptyMemtbl``() =
-        let memtbl = Memtbl() // 空 Memtbl
+        let memtbl = Memtbl() // empty Memtbl
         let timestamp = 987654321L
         let level = 1
 
@@ -98,9 +98,9 @@ type SSTblTests() =
         Assert.That(sstbl.LowKey.Length, Is.EqualTo(0), "LowKey should be empty for empty Memtbl.")
         Assert.That(sstbl.HighKey.Length, Is.EqualTo(0), "HighKey should be empty for empty Memtbl.")
 
-        // 尝试获取任何键都应该返回 None
+        // any key should return None
         Assert.That(
-            SSTbl.TryGet(sstbl, Encoding.UTF8.GetBytes("anykey")).IsNone,
+            sstbl.TryGet(Encoding.UTF8.GetBytes("anykey")).IsNone,
             Is.True,
             "TryGet should return None for empty SSTable."
         )
@@ -111,10 +111,10 @@ type SSTblTests() =
         let timestamp = 1122334455L
         let level = 2
 
-        // 先 Flush 创建文件
+        // first Flush to create file
         let testFilePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
 
-        // 再 Open 读取文件
+        // then Open to read file
         use sstbl =
             match SSTbl.Open(testFilePath) with
             | Some s -> s
@@ -145,12 +145,12 @@ type SSTblTests() =
             | None -> failwith "Failed to open SSTable."
 
         let key = Encoding.UTF8.GetBytes("key0002")
-        let result = SSTbl.TryGet(sstbl, key)
+        let result = sstbl.TryGet(key)
         Assert.That(result.IsSome, Is.True, "Should find existing key.")
         Assert.That(result.Value, Is.EqualTo(2L), "Value should be correct.")
 
         let testKey = Encoding.UTF8.GetBytes("test_key")
-        let testResult = SSTbl.TryGet(sstbl, testKey)
+        let testResult = sstbl.TryGet(testKey)
         Assert.That(testResult.IsSome, Is.True, "Should find the manually added key.")
         Assert.That(testResult.Value, Is.EqualTo(999L), "Value for manually added key should be correct.")
 
@@ -165,7 +165,7 @@ type SSTblTests() =
             | None -> failwith "Failed to open SSTable."
 
         let key = Encoding.UTF8.GetBytes("non_existent_key")
-        let result = SSTbl.TryGet(sstbl, key)
+        let result = sstbl.TryGet(key)
         Assert.That(result.IsNone, Is.True, "Should not find non-existing key.")
 
     [<Test>]
@@ -173,7 +173,7 @@ type SSTblTests() =
         let memtbl = Memtbl()
         let keyToDelete = Encoding.UTF8.GetBytes("key_to_delete")
         memtbl.Add(keyToDelete, 100L)
-        memtbl.SafeDelete(keyToDelete) // 这将在 Memtbl 中写入 -1L 的标记
+        memtbl.SafeDelete(keyToDelete) // this will write a -1L marker in Memtbl
 
         let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
 
@@ -182,7 +182,7 @@ type SSTblTests() =
             | Some s -> s
             | None -> failwith "Failed to open SSTable."
 
-        let result = SSTbl.TryGet(sstbl, keyToDelete)
+        let result = sstbl.TryGet(keyToDelete)
         Assert.That(result.IsSome, Is.True, "Should find the deletion marker key.")
         Assert.That(result.Value, Is.EqualTo(-1L), "Value should be -1L for a deleted key marker.")
 
@@ -196,11 +196,11 @@ type SSTblTests() =
             | Some s -> s
             | None -> failwith "Failed to open SSTable."
 
-        let keyTooLow = Encoding.UTF8.GetBytes("aaaaa") // 小于 key0000
-        let keyTooHigh = Encoding.UTF8.GetBytes("zzzzz") // 大于 key0004
+        let keyTooLow = Encoding.UTF8.GetBytes("aaaaa") // less than key0000
+        let keyTooHigh = Encoding.UTF8.GetBytes("zzzzz") // greater than key0004
 
-        Assert.That(SSTbl.TryGet(sstbl, keyTooLow).IsNone, Is.True, "Should return None for key lower than LowKey.")
-        Assert.That(SSTbl.TryGet(sstbl, keyTooHigh).IsNone, Is.True, "Should return None for key higher than HighKey.")
+        Assert.That(sstbl.TryGet(keyTooLow).IsNone, Is.True, "Should return None for key lower than LowKey.")
+        Assert.That(sstbl.TryGet(keyTooHigh).IsNone, Is.True, "Should return None for key higher than HighKey.")
 
     [<Test>]
     member this.``TryGet_ShouldWorkWithBoundaryKeys``() =
@@ -214,13 +214,13 @@ type SSTblTests() =
 
         // Test LowKey
         let lowKey = Encoding.UTF8.GetBytes("key0000")
-        let lowResult = SSTbl.TryGet(sstbl, lowKey)
+        let lowResult = sstbl.TryGet(lowKey)
         Assert.That(lowResult.IsSome, Is.True, "Should find LowKey.")
         Assert.That(lowResult.Value, Is.EqualTo(0L), "Value for LowKey should be correct.")
 
         // Test HighKey
         let highKey = Encoding.UTF8.GetBytes("key0004")
-        let highResult = SSTbl.TryGet(sstbl, highKey)
+        let highResult = sstbl.TryGet(highKey)
         Assert.That(highResult.IsSome, Is.True, "Should find HighKey.")
         Assert.That(highResult.Value, Is.EqualTo(4L), "Value for HighKey should be correct.")
 
@@ -237,16 +237,16 @@ type SSTblTests() =
         // Explicitly dispose of the SSTbl object
         sstbl.FileStream.Dispose()
 
-        // 尝试再次打开文件，如果 FileStream 被正确关闭，应该没有问题
-        // 这里不能直接检查sstbl.FileStream.CanRead，因为对象可能仍然存在但已关闭底层句柄
-        // 更可靠的方式是尝试对文件进行操作，看是否会抛出"文件已被使用"之类的异常
-        // 但最直接的验证是 File.Exists 和 TryGet 不再工作（但 TryGet 会重新打开流）
-        // 简单起见，这里假设 Dispose 内部的 Close() 是有效的
+        // try to open the file again, if FileStream is correctly closed, it should be fine
+        // here we cannot directly check sstbl.FileStream.CanRead, because the object may still exist but the underlying handle is closed
+        // a more reliable way is to try to operate on the file, see if it throws an exception like "file is in use"
+        // the most direct verification is that File.Exists and TryGet no longer work (but TryGet will reopen the stream)
+        // for simplicity, here we assume that the Close() inside Dispose is effective
         Assert.That(
             fun () ->
                 use fs =
                     new FileStream(testFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
-                // 如果文件能够以独占方式打开，说明上一个流已经关闭
+                // if the file can be opened exclusively, it means the previous stream has been closed
                 Assert.That(fs.CanRead, Is.True)
             , Throws.Nothing
             , "FileStream should be closed after Dispose, allowing re-opening."

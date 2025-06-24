@@ -16,7 +16,8 @@ open Ocis.ValueLocation
 /// Reference: [https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf]
 /// </remarks>
 type Memtbl() =
-    let memtbl = SortedDictionary<byte array, ValueLocation>(new ByteArrayComparer())
+    let memtbl =
+        SortedDictionary<byte array, ValueLocation>(ByteArrayComparer.ComparerInstance)
 
     interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
         member _.GetEnumerator() =

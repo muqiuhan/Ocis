@@ -44,3 +44,7 @@ type ByteArrayComparer() =
 
     member inline this.Compare(lhs: byte array, rhs: byte array) =
         (this :> IComparer<byte array>).Compare(lhs, rhs)
+
+
+module ByteArrayComparer =
+    let ComparerInstance = new ByteArrayComparer()

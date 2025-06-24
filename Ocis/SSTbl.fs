@@ -9,33 +9,28 @@ open System.IO
 /// FileStream needs to be closed and released correctly after use (using the use keyword).
 /// RecordOffsets is a sparse index in memory, pointing to the starting position of each key-value pair in the SSTable file.
 /// LowKey and HighKey are used to quickly determine if a key may exist in this SSTable, reducing unnecessary disk lookups.
-type SSTbl =
-    {
-        Path: string
-        /// Create timestamp, for version control
-        Timestamp: int64
-        /// Compaction level
-        Level: int
-        /// For direct file operations
-        FileStream: FileStream
-        /// Key offsets in memory
-        RecordOffsets: int64 array
-        /// Minimum key
-        LowKey: byte array
-        /// Maximum key
-        HighKey: byte array
-    }
+type SSTbl
+    (
+        path: string,
+        timestamp: int64,
+        level: int,
+        fileStream: FileStream,
+        recordOffsets: int64 array,
+        lowKey: byte array,
+        highKey: byte array
+    ) =
+
+    member _.Path = path
+    member _.Timestamp = timestamp
+    member _.Level = level
+    member _.FileStream = fileStream
+    member _.RecordOffsets = recordOffsets
+    member _.LowKey = lowKey
+    member _.HighKey = highKey
 
     // Implement IDisposable interface, ensure that the FileStream is closed when the SSTbl object is no longer used.
     interface System.IDisposable with
         member this.Dispose() = this.FileStream.Dispose()
-
-
-// SSTbl module functions
-module SSTbl =
-
-    // Use the byte array comparator defined in the Memtbl module
-    let private comparer = new ByteArrayComparer()
 
     /// <summary>
     /// Flush the data from Memtbl to a new SSTable file.
@@ -45,7 +40,7 @@ module SSTbl =
     /// <param name="timestamp">The creation timestamp of the SSTable.</param>
     /// <param name="level">The compression level of the SSTable.</param>
     /// <returns>The path of the created SSTable file.</returns>
-    let Flush (memtbl: Memtbl, path: string, timestamp: int64, level: int) : string =
+    static member Flush(memtbl: Memtbl, path: string, timestamp: int64, level: int) : string =
         use fileStream =
             new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)
 
@@ -97,7 +92,7 @@ module SSTbl =
     /// </summary>
     /// <param name="path">The path of the SSTable file.</param>
     /// <returns>An Option type: Some SSTbl if successful, otherwise None.</returns>
-    let Open (path: string) : SSTbl option =
+    static member Open(path: string) : SSTbl option =
         let mutable fileStream: FileStream = null // Declare a mutable variable to close the stream in case of an exception
 
         try
@@ -129,14 +124,7 @@ module SSTbl =
             for i = 0 to indexEntriesCount - 1 do
                 recordOffsets.[i] <- reader.ReadInt64()
 
-            Some
-                { Path = path
-                  Timestamp = timestamp
-                  Level = level
-                  FileStream = fileStream // FileStream must remain open, managed by the returned SSTbl object
-                  RecordOffsets = recordOffsets
-                  LowKey = lowKey
-                  HighKey = highKey }
+            Some(new SSTbl(path, timestamp, level, fileStream, recordOffsets, lowKey, highKey))
         with
         | :? FileNotFoundException ->
             if fileStream <> null then
@@ -159,14 +147,14 @@ module SSTbl =
     /// <returns>
     /// An Option type: Some ValueLocation if found, otherwise None.
     /// </returns>
-    let TryGet (sstbl: SSTbl, key: byte array) : ValueLocation option =
-        if sstbl.RecordOffsets.Length = 0 then
+    member _.TryGet(key: byte array) : ValueLocation option =
+        if recordOffsets.Length = 0 then
             None // Empty SSTable
 
         // Quick range check, if the key is outside the range of SSTable's LowKey and HighKey, return None
         elif
-            comparer.Compare(key, sstbl.LowKey) < 0
-            || comparer.Compare(key, sstbl.HighKey) > 0
+            ByteArrayComparer.ComparerInstance.Compare(key, lowKey) < 0
+            || ByteArrayComparer.ComparerInstance.Compare(key, highKey) > 0
         then
             None
 
@@ -174,21 +162,21 @@ module SSTbl =
             // Binary search on the RecordOffsets array in memory.
             // Since RecordOffsets only stores offsets, we need to read the actual key from the file for each probe.
             let mutable low = 0
-            let mutable high = sstbl.RecordOffsets.Length - 1
+            let mutable high = recordOffsets.Length - 1
             let mutable found = false
             let mutable valueLocation = -1L
 
             while low <= high && not found do
                 let midIdx = low + (high - low) / 2
-                let currentOffset = sstbl.RecordOffsets.[midIdx]
+                let currentOffset = recordOffsets.[midIdx]
 
                 // Move the read/write position of the FileStream to the current offset
-                sstbl.FileStream.Seek(currentOffset, SeekOrigin.Begin) |> ignore
+                fileStream.Seek(currentOffset, SeekOrigin.Begin) |> ignore
                 // Use BinaryReader to read data, with leaveOpen: true to ensure the underlying FileStream is not closed
-                use reader = new BinaryReader(sstbl.FileStream, System.Text.Encoding.UTF8, true)
+                use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
 
                 let currentKey = Serialization.readByteArray reader // Read the key at the current position
-                let cmp = comparer.Compare(key, currentKey) // Compare the target key and the current key
+                let cmp = ByteArrayComparer.ComparerInstance.Compare(key, currentKey) // Compare the target key and the current key
 
                 if cmp = 0 then
                     // Found an exact match
@@ -205,4 +193,4 @@ module SSTbl =
     /// Close the underlying file stream of the SSTbl instance.
     /// It is recommended to use the `use` keyword and the `IDisposable` implementation of SSTbl to automatically manage the lifecycle of the stream.
     /// </summary>
-    let Close (sstbl: SSTbl) : unit = sstbl.FileStream.Close()
+    member this.Close() : unit = this.FileStream.Close()
