@@ -3,12 +3,7 @@ module Ocis.Memtbl
 open System
 open System.Collections.Generic
 open Ocis.Utils.ByteArrayComparer
-
-/// <summary>
-/// The value location in Value Log (byte offset).
-/// -1 is used to represent a deleted record.
-/// </summary>
-type ValueLocation = int64
+open Ocis.ValueLocation
 
 /// <summary>
 /// Memtbl (Memory Table) represents the memory buffer in WiscKey storage engine.

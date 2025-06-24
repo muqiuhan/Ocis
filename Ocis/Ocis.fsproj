@@ -4,7 +4,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="ValueLocation.fs" />
     <Compile Include="utils\ByteArrayComparer.fs" />
+    <Compile Include="utils\Serialization.fs" />
     <Compile Include="Memtbl.fs" />
     <Compile Include="SSTbl.fs" />
     <Compile Include="Valog.fs" />

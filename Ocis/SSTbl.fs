@@ -2,8 +2,9 @@ module Ocis.SSTbl
 
 open Ocis.Memtbl
 open Ocis.Utils.ByteArrayComparer
+open Ocis.Utils.Serialization
+open Ocis.ValueLocation
 open System.IO
-open System.Collections.Generic
 
 /// FileStream needs to be closed and released correctly after use (using the use keyword).
 /// RecordOffsets is a sparse index in memory, pointing to the starting position of each key-value pair in the SSTable file.
@@ -29,23 +30,6 @@ type SSTbl =
     interface System.IDisposable with
         member this.Dispose() = this.FileStream.Dispose()
 
-// Internal serialization helper functions, used to read and write keys (byte[]) and value locations (int64).
-module internal Serialization =
-    // Write byte array to BinaryWriter. First write length (int32), then write the byte array itself.
-    let writeByteArray (writer: BinaryWriter) (data: byte array) =
-        writer.Write(data.Length)
-        writer.Write(data)
-
-    // Read byte array from BinaryReader. First read length (int32), then read the specified length of byte array.
-    let readByteArray (reader: BinaryReader) =
-        let len = reader.ReadInt32()
-        reader.ReadBytes(len)
-
-    // Write ValueLocation (int64) to BinaryWriter.
-    let writeValueLocation (writer: BinaryWriter) (loc: ValueLocation) = writer.Write(loc)
-
-    // Read ValueLocation (int64) from BinaryReader.
-    let readValueLocation (reader: BinaryReader) = reader.ReadInt64()
 
 // SSTbl module functions
 module SSTbl =
@@ -61,7 +45,7 @@ module SSTbl =
     /// <param name="timestamp">The creation timestamp of the SSTable.</param>
     /// <param name="level">The compression level of the SSTable.</param>
     /// <returns>The path of the created SSTable file.</returns>
-    let flush (memtbl: Memtbl) (path: string) (timestamp: int64) (level: int) : string =
+    let Flush (memtbl: Memtbl, path: string, timestamp: int64, level: int) : string =
         use fileStream =
             new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)
 
@@ -113,7 +97,7 @@ module SSTbl =
     /// </summary>
     /// <param name="path">The path of the SSTable file.</param>
     /// <returns>An Option type: Some SSTbl if successful, otherwise None.</returns>
-    let openSSTbl (path: string) : SSTbl option =
+    let Open (path: string) : SSTbl option =
         let mutable fileStream: FileStream = null // Declare a mutable variable to close the stream in case of an exception
 
         try
@@ -122,12 +106,14 @@ module SSTbl =
             use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
 
             // 1. Read footer (Footer)
-            // First, read the total size of the footer from the end of the file
-            fileStream.Seek(-4L, SeekOrigin.End) |> ignore // Back up 4 bytes to read footerSize (int32)
-            let footerSize = reader.ReadInt32()
+            // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
+            fileStream.Seek(-4L, SeekOrigin.End) |> ignore
+            let footerSize = reader.ReadInt32() // Read the size of the footer content (excluding footerSize itself)
 
-            // Back up to the starting position of the footer
-            fileStream.Seek(-footerSize |> int64, SeekOrigin.End) |> ignore
+            // Now, move the file pointer back to the starting position of the footer content (timestamp).
+            // The total amount of backtracking is footerSize + 4 bytes occupied by footerSize itself.
+            fileStream.Seek(-(footerSize + 4 |> int64), SeekOrigin.End) |> ignore
+
             let timestamp = reader.ReadInt64()
             let level = reader.ReadInt32()
             let lowKey = Serialization.readByteArray reader
@@ -173,7 +159,7 @@ module SSTbl =
     /// <returns>
     /// An Option type: Some ValueLocation if found, otherwise None.
     /// </returns>
-    let tryGet (sstbl: SSTbl) (key: byte array) : ValueLocation option =
+    let TryGet (sstbl: SSTbl, key: byte array) : ValueLocation option =
         if sstbl.RecordOffsets.Length = 0 then
             None // Empty SSTable
 
@@ -219,4 +205,4 @@ module SSTbl =
     /// Close the underlying file stream of the SSTbl instance.
     /// It is recommended to use the `use` keyword and the `IDisposable` implementation of SSTbl to automatically manage the lifecycle of the stream.
     /// </summary>
-    let close (sstbl: SSTbl) : unit = sstbl.FileStream.Close()
+    let Close (sstbl: SSTbl) : unit = sstbl.FileStream.Close()
