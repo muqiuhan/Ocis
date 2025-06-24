@@ -2,51 +2,13 @@ module Ocis.Memtbl
 
 open System
 open System.Collections.Generic
+open Ocis.Utils.ByteArrayComparer
 
 /// <summary>
 /// The value location in Value Log (byte offset).
 /// -1 is used to represent a deleted record.
 /// </summary>
 type ValueLocation = int64
-
-/// <summary>
-/// Custom byte array comparer.
-/// F# Map requires a reliable comparer to correctly sort and find byte array keys,
-/// because the default comparison is based on reference rather than content.
-/// </summary>
-type private ByteArrayComparer() =
-    interface IComparer<byte array> with
-        /// <summary>
-        /// Compare two byte arrays.
-        /// </summary>
-        /// <param name="lhs">Left byte array.</param>
-        /// <param name="rhs">Right byte array.</param>
-        /// <returns>
-        /// If lhs is less than rhs, return a negative number;
-        /// If lhs is greater than rhs, return a positive number;
-        /// If both are equal, return 0.
-        /// </returns>
-        member _.Compare(lhs: byte array, rhs: byte array) =
-            // Compare length first, return result if different
-            let lenCmp = lhs.Length.CompareTo(rhs.Length)
-
-            if lenCmp <> 0 then
-                lenCmp
-            else
-                // If length is the same, compare byte by byte
-                // Use tail recursion to replace the loop with break
-                let rec compareBytes (idx: int) =
-                    if idx = lhs.Length then
-                        0 // All bytes are the same, arrays are equal
-                    else
-                        let byteCmp = lhs.[idx].CompareTo(rhs.[idx])
-
-                        if byteCmp <> 0 then
-                            byteCmp // Found different byte, return comparison result
-                        else
-                            compareBytes (idx + 1) // Continue to compare next byte
-
-                compareBytes 0 // Start from the first byte
 
 /// <summary>
 /// Memtbl (Memory Table) represents the memory buffer in WiscKey storage engine.
@@ -62,11 +24,11 @@ type Memtbl() =
     let memtbl = SortedDictionary<byte array, ValueLocation>(new ByteArrayComparer())
 
     interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
-        member this.GetEnumerator() =
+        member _.GetEnumerator() =
             memtbl.GetEnumerator() :> IEnumerator<KeyValuePair<byte array, ValueLocation>>
 
     interface Collections.IEnumerable with
-        member this.GetEnumerator() =
+        member _.GetEnumerator() =
             memtbl.GetEnumerator() :> Collections.IEnumerator
 
     /// <summary>
@@ -84,7 +46,7 @@ type Memtbl() =
     /// An Option type: Some ValueLocation if the key is found, otherwise None.
     /// This follows the idiomatic way of handling possible missing values in F#.
     /// </returns>
-    member this.TryGet(key: byte array) : ValueLocation option =
+    member _.TryGet(key: byte array) : ValueLocation option =
         match memtbl.TryGetValue(key) with
         | true, value -> Some value
         | false, _ -> None
@@ -109,4 +71,4 @@ type Memtbl() =
     /// Delete a key from Memtbl.
     /// </summary>
     /// <param name="key">The key to delete.</param>
-    member this.Delete(key: byte array) : unit = memtbl.[key] <- -1L
+    member _.Delete(key: byte array) : unit = memtbl.[key] <- -1L
