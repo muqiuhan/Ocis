@@ -11,6 +11,6 @@
     <Compile Include="SSTbl.fs" />
     <Compile Include="Valog.fs" />
     <Compile Include="WAL.fs" />
-    <Compile Include="Library.fs" />
+    <Compile Include="Ocis.fs" />
   </ItemGroup>
 </Project>
