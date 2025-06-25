@@ -61,7 +61,7 @@ type Wal(path: string, fileStream: FileStream) =
                 writer.Write(1uy) // 1 indicates Delete type
                 Serialization.writeByteArray writer key
 
-            fileStream.Flush() // Ensure data is written to disk
+        // fileStream.Flush() // Ensure data is written to disk (Moved to OcisDB for batched flushing)
         )
 
     /// <summary>

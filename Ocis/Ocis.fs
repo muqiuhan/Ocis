@@ -95,7 +95,7 @@ type OcisDB
                                     | Some currentList -> Some(sstbl :: currentList)
                                     | None -> Some [ sstbl ])
 
-                            printfn "Memtable flushed to SSTable: %s" flushedSSTblPath
+                            // printfn "Memtable flushed to SSTable: %s" flushedSSTblPath
                             // After flushing, check if compaction is needed
                             mailbox.Post(TriggerCompaction)
                         | None -> printfn "Error: Failed to open flushed SSTable at %s" flushedSSTblPath
@@ -105,7 +105,8 @@ type OcisDB
                 | TriggerCompaction ->
                     // Compaction logic (simplified for now)
                     // This is where more complex LevelDB/RocksDB like compaction strategies would go.
-                    printfn "Triggering compaction (simplified)."
+                    // printfn "Triggering compaction (simplified)."
+                    ()
         // In a real implementation, this would involve selecting SSTables,
         // merging them, and updating the SSTables map.
         }
