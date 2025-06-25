@@ -224,6 +224,77 @@ type SSTblTests() =
         Assert.That(highResult.IsSome, Is.True, "Should find HighKey.")
         Assert.That(highResult.Value, Is.EqualTo(4L), "Value for HighKey should be correct.")
 
+
+    [<Test>]
+    member this.``Seq_ShouldIterAllKeyValuePairsInOrder``() =
+        let memtbl = createMemtbl 5 // key0000 -> 0L, key0001 -> 1L, ..., key0004 -> 4L
+        let timestamp = 0L
+        let level = 0
+        let testFilePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+
+        use sstbl =
+            match SSTbl.Open(testFilePath) with
+            | Some s -> s
+            | None -> failwith "Failed to open SSTable for enumeration test."
+
+        let mutable expectedIdx = 0
+
+        sstbl
+        |> Seq.iter (fun (KeyValue(key, valueLocation)) ->
+            let expectedKey = Encoding.UTF8.GetBytes($"key{expectedIdx:D4}")
+            let expectedValue = int64 expectedIdx
+
+            Assert.That(
+                Encoding.UTF8.GetString(key),
+                Is.EqualTo(Encoding.UTF8.GetString(expectedKey)),
+                $"Enumerated key at index {expectedIdx} should match."
+            )
+
+            Assert.That(
+                valueLocation,
+                Is.EqualTo(expectedValue),
+                $"Enumerated value at index {expectedIdx} should match."
+            )
+
+            expectedIdx <- expectedIdx + 1)
+
+        Assert.That(expectedIdx, Is.EqualTo(5), "All 5 key-value pairs should be enumerated.")
+
+
+    [<Test>]
+    member this.``IEnumerable_ShouldEnumerateAllKeyValuePairsInOrder``() =
+        let memtbl = createMemtbl 5 // key0000 -> 0L, key0001 -> 1L, ..., key0004 -> 4L
+        let timestamp = 0L
+        let level = 0
+        let testFilePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+
+        use sstbl =
+            match SSTbl.Open(testFilePath) with
+            | Some s -> s
+            | None -> failwith "Failed to open SSTable for enumeration test."
+
+        let mutable expectedIdx = 0
+
+        for KeyValue(key, valueLocation) in sstbl do
+            let expectedKey = Encoding.UTF8.GetBytes($"key{expectedIdx:D4}")
+            let expectedValue = int64 expectedIdx
+
+            Assert.That(
+                Encoding.UTF8.GetString(key),
+                Is.EqualTo(Encoding.UTF8.GetString(expectedKey)),
+                $"Enumerated key at index {expectedIdx} should match."
+            )
+
+            Assert.That(
+                valueLocation,
+                Is.EqualTo(expectedValue),
+                $"Enumerated value at index {expectedIdx} should match."
+            )
+
+            expectedIdx <- expectedIdx + 1
+
+        Assert.That(expectedIdx, Is.EqualTo(5), "All 5 key-value pairs should be enumerated.")
+
     [<Test>]
     member this.``Dispose_ShouldCloseFileStream``() =
         let memtbl = createMemtbl 1

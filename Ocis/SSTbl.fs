@@ -5,6 +5,8 @@ open Ocis.Utils.ByteArrayComparer
 open Ocis.Utils.Serialization
 open Ocis.ValueLocation
 open System.IO
+open System.Collections.Generic // For KeyValuePair
+open System.Collections // For Collections.IEnumerable
 
 /// FileStream needs to be closed and released correctly after use (using the use keyword).
 /// RecordOffsets is a sparse index in memory, pointing to the starting position of each key-value pair in the SSTable file.
@@ -31,6 +33,32 @@ type SSTbl
     // Implement IDisposable interface, ensure that the FileStream is closed when the SSTbl object is no longer used.
     interface System.IDisposable with
         member this.Dispose() = this.FileStream.Dispose()
+
+    // Implement IEnumerable<KeyValuePair<byte array, ValueLocation>>
+    interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
+        member this.GetEnumerator() =
+            // Helper function to read a key-value pair from the stream at a given offset
+            let readKeyValuePair (stream: FileStream, offset: int64) : KeyValuePair<byte array, ValueLocation> =
+                lock stream (fun () ->
+                    stream.Seek(offset, SeekOrigin.Begin) |> ignore
+                    use reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true)
+
+                    let key = Serialization.readByteArray reader
+                    let valueLocation = Serialization.readValueLocation reader
+                    new KeyValuePair<byte array, ValueLocation>(key, valueLocation))
+
+            // Create an enumerator that reads key-value pairs from the SSTable file
+            (seq {
+                for offset in this.RecordOffsets do
+                    yield readKeyValuePair (this.FileStream, offset)
+            })
+                .GetEnumerator()
+
+    // Implement Collections.IEnumerable (non-generic version)
+    interface IEnumerable with
+        member this.GetEnumerator() =
+            (this :> IEnumerable<KeyValuePair<byte array, ValueLocation>>).GetEnumerator()
+            :> System.Collections.IEnumerator
 
     /// <summary>
     /// Flush the data from Memtbl to a new SSTable file.
