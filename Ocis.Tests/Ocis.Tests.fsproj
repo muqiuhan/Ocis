@@ -9,6 +9,7 @@
     <Compile Include="Memtbl.fs" />
     <Compile Include="SSTbl.fs" />
     <Compile Include="Valog.fs" />
+    <Compile Include="WAL.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
