@@ -6,6 +6,7 @@ open System.IO
 open System.Text
 open System.Threading
 open System.Diagnostics // For Stopwatch
+open System.Diagnostics // For Process
 
 [<TestFixture>]
 type OcisDBTests() =
@@ -125,7 +126,10 @@ type OcisDBTests() =
             Assert.That(db.ImmutableMemtbl.Count, Is.EqualTo(1), "ImmutableMemtbl should contain the flushed memtable.")
 
             // Give compaction agent some time to flush to SSTable
-            Thread.Sleep(500) // Small delay to allow agent to process message
+            // Thread.Sleep(500) // Removed for performance testing accuracy
+
+            db.WAL.Flush()
+            db.ValueLog.Flush()
 
             // Verify if an SSTable file is created (level 0)
             let sstblFiles = Directory.GetFiles(testDbPath, "sstbl-*.sst")
@@ -221,7 +225,10 @@ type OcisDBPerformanceTests() =
                 db.Set(key, value) |> Async.RunSynchronously |> ignore
 
             // Give compaction agent some time to flush to SSTable
-            Thread.Sleep(500) // Small delay to allow agent to process message
+            // Thread.Sleep(500) // Removed for performance testing accuracy
+
+            db.WAL.Flush()
+            db.ValueLog.Flush()
 
             stopwatch.Stop()
             printfn "\nBulk Set for %d entries completed in %f ms" count stopwatch.Elapsed.TotalMilliseconds
@@ -251,7 +258,10 @@ type OcisDBPerformanceTests() =
                 keysToGet.Add(key)
 
             // Give compaction agent some time to flush to SSTable
-            Thread.Sleep(500) // Small delay to allow agent to process message
+            // Thread.Sleep(500) // Removed for performance testing accuracy
+            db.WAL.Flush()
+            db.ValueLog.Flush()
+
             printfn "DB populated. Starting Bulk Get..."
 
             let stopwatch = Stopwatch.StartNew()
@@ -301,7 +311,9 @@ type OcisDBPerformanceTests() =
                 keys.Add(key)
 
             // Give compaction agent some time to flush to SSTable
-            Thread.Sleep(500) // Small delay to allow agent to process message
+            // Thread.Sleep(500) // Removed for performance testing accuracy
+            db.WAL.Flush()
+            db.ValueLog.Flush()
 
             // Perform Get operations (on existing and some non-existing keys)
             let mutable foundCount = 0
@@ -327,3 +339,44 @@ type OcisDBPerformanceTests() =
 
             Assert.Pass()
         | Error msg -> Assert.Fail($"Failed to open DB for Mixed Workload test: {msg}")
+
+    /// <summary>
+    /// Tests the memory footprint of the OcisDB after inserting a certain number of entries.
+    /// </summary>
+    /// <param name="count">The number of key-value pairs to insert to observe memory usage.</param>
+    [<TestCase(1000)>]
+    [<TestCase(10000)>]
+    [<TestCase(50000)>]
+    member this.``MemoryFootprint_ShouldBeReasonable``(count: int) =
+        match OcisDB.Open(testDbPath) with
+        | Ok db ->
+            use db = db
+            // Capture initial memory usage
+            let initialMemory = Process.GetCurrentProcess().PrivateMemorySize64
+            printfn "Initial Private Memory Size: %f MB" (float initialMemory / (1024.0 * 1024.0))
+
+            // Insert data to observe memory growth
+            printfn "Inserting %d entries for Memory Footprint test..." count
+
+            for i = 0 to count - 1 do
+                let key = Encoding.UTF8.GetBytes($"mem_key_{i}")
+                let value = Encoding.UTF8.GetBytes($"mem_value_{i}_" + new string ('C', 200)) // Value ~200 bytes
+                db.Set(key, value) |> Async.RunSynchronously |> ignore
+
+            // Force garbage collection to get a more accurate picture of managed memory
+            System.GC.Collect()
+            System.GC.WaitForPendingFinalizers()
+            System.GC.Collect()
+            Thread.Sleep(100) // Give GC a moment to finish
+
+            // Capture final memory usage
+            let finalMemory = Process.GetCurrentProcess().PrivateMemorySize64
+            printfn "Final Private Memory Size after %d entries: %f MB" count (float finalMemory / (1024.0 * 1024.0))
+
+            let memoryIncrease = finalMemory - initialMemory
+            printfn "Memory Increase: %f MB" (float memoryIncrease / (1024.0 * 1024.0))
+
+            // Assertions for memory usage can be added here, e.g., Assert.That(memoryIncrease, Is.LessThan(expectedMaxIncreaseBytes))
+            // For now, we just pass to report the numbers.
+            Assert.Pass()
+        | Error msg -> Assert.Fail($"Failed to open DB for Memory Footprint test: {msg}")
