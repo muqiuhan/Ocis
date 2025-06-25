@@ -77,7 +77,7 @@ type OcisDB
                     // Logic to flush memtblToFlush to a new SSTable
                     // For simplicity, let's assume Level 0 for now.
                     let newSSTblPath =
-                        Path.Combine((!dbRef).Dir, $"sstbl-{Guid.NewGuid().ToString()}.sst")
+                        Path.Combine(dbRef.Value.Dir, $"sstbl-{Guid.NewGuid().ToString()}.sst")
 
                     let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                     let level = 0 // Always flush to Level 0
@@ -88,8 +88,8 @@ type OcisDB
                         match SSTbl.Open(flushedSSTblPath) with
                         | Some sstbl ->
                             // Update the SSTables map in the OcisDB instance
-                            (!dbRef).SSTables <-  // 直接赋值给可变属性
-                                (!dbRef).SSTables
+                            dbRef.Value.SSTables <-  // 直接赋值给可变属性
+                                dbRef.Value.SSTables
                                 |> Map.change level (fun currentListOption ->
                                     match currentListOption with
                                     | Some currentList -> Some(sstbl :: currentList)
@@ -151,7 +151,7 @@ type OcisDB
                     for entry in replayedEntries do
                         match entry with
                         | WalEntry.Set(key, valueLoc) -> initialMemtbl.Add(key, valueLoc)
-                        | WalEntry.Delete(key) -> initialMemtbl.SafeDelete(key) // Use SafeDelete for potential key not found
+                        | WalEntry.Delete(key) -> initialMemtbl.Delete(key)
 
                     // Load existing SSTables
                     let mutable loadedSSTables = Map.empty<int, SSTbl list> // 修正 Map.empty
@@ -187,7 +187,7 @@ type OcisDB
                             gcAgent
                         )
 
-                    dbRef := ocisDB // Update the mutable reference
+                    dbRef.Value <- ocisDB // Update the mutable reference
 
                     Ok ocisDB))
         with ex ->
@@ -217,13 +217,7 @@ type OcisDB
                 // Memtbl does not directly expose a Count property, so we might need to add one or iterate.
                 // For now, let's assume we can determine its 'size' indirectly or add a Count property.
                 // Adding a simple workaround for demonstration. In Memtbl.fs, we'd add `member _.Count = memtbl.Count`
-                let memtblCount =
-                    let mutable count = 0
-
-                    for _ in currentMemtbl do
-                        count <- count + 1
-
-                    count
+                let memtblCount = currentMemtbl.Count
 
                 if memtblCount >= 100 then
                     let frozenMemtbl = currentMemtbl
@@ -308,13 +302,7 @@ type OcisDB
 
                 // Check MemTable size and trigger flush if needed (same logic as Set)
                 // Assuming Memtbl has a Count property or similar mechanism to get its size.
-                let memtblCount =
-                    let mutable count = 0
-
-                    for _ in currentMemtbl do
-                        count <- count + 1
-
-                    count
+                let memtblCount = currentMemtbl.Count
 
                 if memtblCount >= 100 then
                     let frozenMemtbl = currentMemtbl

@@ -27,6 +27,8 @@ type Memtbl() =
         member _.GetEnumerator() =
             memtbl.GetEnumerator() :> Collections.IEnumerator
 
+    member _.Count = memtbl.Count
+
     /// <summary>
     /// Add or update a key-value pair in Memtbl.
     /// </summary>
