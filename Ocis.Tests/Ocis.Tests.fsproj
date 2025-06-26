@@ -16,6 +16,7 @@
     <Compile Include="WAL.fs" />
     <Compile Include="Ocis.fs" />
     <Compile Include="OcisDBBenchmarks.fs" />
+    <Compile Include="AdvancedBenchmarks.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
