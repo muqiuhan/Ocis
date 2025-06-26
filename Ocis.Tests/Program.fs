@@ -6,8 +6,11 @@ open Ocis.Tests.AdvancedBenchmarks
 
 [<EntryPoint>]
 let main argv =
-    match argv[0] with
-    | "advance" -> BenchmarkRunner.Run<AdvancedBenchmarks>() |> ignore
-    | _ -> BenchmarkRunner.Run<OcisDBBenchmarks>() |> ignore
+    if argv.Length = 0 then
+        BenchmarkRunner.Run<OcisDBBenchmarks>() |> ignore
+    else
+        match argv[0] with
+        | "advance" -> BenchmarkRunner.Run<AdvancedBenchmarks>() |> ignore
+        | _ -> BenchmarkRunner.Run<OcisDBBenchmarks>() |> ignore
 
     0

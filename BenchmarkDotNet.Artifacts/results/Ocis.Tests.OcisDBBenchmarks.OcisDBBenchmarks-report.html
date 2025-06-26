@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8' />
-<title>Ocis.Tests.OcisDBBenchmarks.OcisDBBenchmarks-20250626-143938</title>
+<title>Ocis.Tests.OcisDBBenchmarks.OcisDBBenchmarks-20250626-191546</title>
 
 <style type="text/css">
 	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
@@ -13,11 +13,11 @@
 </head>
 <body>
 <pre><code>
-BenchmarkDotNet v0.15.2, Linux openSUSE Tumbleweed
-AMD Ryzen 7 8845HS w/ Radeon 780M Graphics 5.14GHz, 1 CPU, 16 logical and 8 physical cores
-.NET SDK 9.0.301
-  [Host]   : .NET 9.0.6 (9.0.625.26613), X64 AOT AVX-512F+CD+BW+DQ+VL+VBMI DEBUG
-  ShortRun : .NET 9.0.6 (9.0.625.26613), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+BenchmarkDotNet v0.15.2, Linux Pop!_OS 22.04 LTS
+AMD Ryzen 7 6800H with Radeon Graphics 4.79GHz, 1 CPU, 16 logical and 8 physical cores
+.NET SDK 9.0.203
+  [Host]   : .NET 9.0.4 (9.0.425.16305), X64 AOT AVX2 DEBUG
+  ShortRun : .NET 9.0.4 (9.0.425.16305), X64 RyuJIT AVX2
 </code></pre>
 <pre><code>Job=ShortRun  InvocationCount=1  IterationCount=3  
 LaunchCount=1  UnrollFactor=1  WarmupCount=3  
@@ -26,12 +26,12 @@ LaunchCount=1  UnrollFactor=1  WarmupCount=3
 <table>
 <thead><tr><th>Method</th><th>Count</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Gen1</th><th>Allocated</th>
 </tr>
-</thead><tbody><tr><td>BulkSet</td><td>1000</td><td>9.526 ms</td><td>3.969 ms</td><td>0.2176 ms</td><td>-</td><td>-</td><td>1004.95 KB</td>
-</tr><tr><td>BulkGet</td><td>1000</td><td>13.117 ms</td><td>11.373 ms</td><td>0.6234 ms</td><td>-</td><td>-</td><td>2403.21 KB</td>
-</tr><tr><td>BulkSet</td><td>10000</td><td>113.793 ms</td><td>148.250 ms</td><td>8.1261 ms</td><td>1000.0000</td><td>-</td><td>9950.24 KB</td>
-</tr><tr><td>BulkGet</td><td>10000</td><td>122.123 ms</td><td>264.695 ms</td><td>14.5088 ms</td><td>2000.0000</td><td>1000.0000</td><td>23907.48 KB</td>
-</tr><tr><td>BulkSet</td><td>100000</td><td>705.837 ms</td><td>444.079 ms</td><td>24.3415 ms</td><td>11000.0000</td><td>-</td><td>96533.24 KB</td>
-</tr><tr><td>BulkGet</td><td>100000</td><td>742.808 ms</td><td>247.308 ms</td><td>13.5558 ms</td><td>28000.0000</td><td>2000.0000</td><td>234432.63 KB</td>
+</thead><tbody><tr><td>BulkSet</td><td>1000</td><td>4.856 ms</td><td>7.835 ms</td><td>0.4294 ms</td><td>-</td><td>-</td><td>1004.97 KB</td>
+</tr><tr><td>BulkGet</td><td>1000</td><td>7.431 ms</td><td>8.464 ms</td><td>0.4639 ms</td><td>-</td><td>-</td><td>2403.23 KB</td>
+</tr><tr><td>BulkSet</td><td>10000</td><td>52.731 ms</td><td>19.333 ms</td><td>1.0597 ms</td><td>-</td><td>-</td><td>9951.96 KB</td>
+</tr><tr><td>BulkGet</td><td>10000</td><td>92.312 ms</td><td>19.018 ms</td><td>1.0424 ms</td><td>-</td><td>-</td><td>23907.3 KB</td>
+</tr><tr><td>BulkSet</td><td>100000</td><td>288.006 ms</td><td>82.798 ms</td><td>4.5384 ms</td><td>1000.0000</td><td>-</td><td>95578.96 KB</td>
+</tr><tr><td>BulkGet</td><td>100000</td><td>390.799 ms</td><td>115.698 ms</td><td>6.3418 ms</td><td>3000.0000</td><td>1000.0000</td><td>234432.65 KB</td>
 </tr></tbody></table>
 </body>
 </html>
