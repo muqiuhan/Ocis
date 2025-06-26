@@ -29,6 +29,22 @@ type SSTbl
     member _.RecordOffsets = recordOffsets
     member _.LowKey = lowKey
     member _.HighKey = highKey
+    member _.Size = fileStream.Length
+
+    /// <summary>
+    /// Checks if the key range of this SSTable overlaps with another SSTable.
+    /// </summary>
+    /// <param name="other">The other SSTable to compare with.</param>
+    /// <returns>True if the key ranges overlap, false otherwise.</returns>
+    member this.Overlaps(other: SSTbl) : bool =
+        let comparer = ByteArrayComparer.ComparerInstance
+        // Check for overlap: (this.LowKey <= other.HighKey AND this.HighKey >= other.LowKey)
+        // OR (other.LowKey <= this.HighKey AND other.HighKey >= this.LowKey)
+        let noOverlap =
+            (comparer.Compare(this.HighKey, other.LowKey) < 0)
+            || (comparer.Compare(other.HighKey, this.LowKey) < 0)
+
+        not noOverlap
 
     // Implement IDisposable interface, ensure that the FileStream is closed when the SSTbl object is no longer used.
     interface System.IDisposable with

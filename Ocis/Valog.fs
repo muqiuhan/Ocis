@@ -2,6 +2,7 @@ module Ocis.Valog
 
 open System
 open System.IO
+open Ocis.ValueLocation
 
 /// <summary>
 /// Valog (Value Log) represents the append-only log file in WiscKey storage engine that stores actual values.
@@ -17,7 +18,7 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
 
     let path: string = path
     /// The file stream for direct file operations. FileStream internally handles file pointers and buffers.
-    let fileStream: FileStream = fileStream
+    let mutable fileStream: FileStream = fileStream
     /// The next writable position, also represents the logical end of the file.
     let mutable head: int64 = head
     /// The position of the oldest valid value (for garbage collection). Data before this position is considered garbage.
@@ -25,6 +26,8 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
 
     member _.Path = path
     member _.FileStream = fileStream
+
+    member private _.SetFileStream(fs) = fileStream <- fs
 
     member _.Head
         with get () = head
@@ -157,3 +160,75 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
     /// </remarks>
     [<Obsolete "This function should not be called directly.">]
     member inline this.Dispose() = (this :> IDisposable).Dispose()
+
+    /// <summary>
+    /// Performs garbage collection on the Value Log.
+    /// This is a simplified placeholder. A full implementation would involve:
+    /// 1. Identifying all live value locations across all SSTables and Memtables.
+    /// 2. Copying live data to a new Valog file.
+    /// 3. Deleting the old Valog file and renaming the new one.
+    /// 4. Updating SSTable value locations if necessary (highly complex).
+    /// </summary>
+    /// <param name="valog">The Valog instance.</param>
+    /// <param name="liveLocations">A set of ValueLocations that are currently live across all SSTables and Memtables.</param>
+    static member CollectGarbage
+        (valog: Valog, liveLocations: Set<int64>)
+        : Async<Result<Valog * Map<int64, int64>, string> option> =
+        async {
+            printfn "Valog GC: Started. Received %d live locations." liveLocations.Count
+
+            let tempValogPath = valog.Path + ".temp"
+            let mutable remappedLocations = Map.empty<int64, int64>
+
+            try
+                // Close the old file stream before moving/deleting it
+                valog.Close()
+
+                use newFileStream =
+                    new FileStream(tempValogPath, FileMode.Create, FileAccess.Write, FileShare.None)
+
+                use newWriter = new BinaryWriter(newFileStream, System.Text.Encoding.UTF8, false) // False means BinaryWriter owns the stream
+
+                // Reopen the old Valog file for reading to copy live data
+                use oldFileStream =
+                    new FileStream(valog.Path, FileMode.Open, FileAccess.Read, FileShare.Read)
+
+                use oldReader = new BinaryReader(oldFileStream, System.Text.Encoding.UTF8, true)
+
+                while oldFileStream.Position < oldFileStream.Length do
+                    let originalOffset = oldFileStream.Position
+                    let keyLength = oldReader.ReadInt32()
+                    let key = oldReader.ReadBytes(keyLength)
+                    let valueLength = oldReader.ReadInt32()
+                    let value = oldReader.ReadBytes(valueLength)
+
+                    if liveLocations.Contains(originalOffset) then
+                        let newOffset = newFileStream.Position
+                        remappedLocations <- remappedLocations.Add(originalOffset, newOffset)
+
+                        newWriter.Write(keyLength)
+                        newWriter.Write(key)
+                        newWriter.Write(valueLength)
+                        newWriter.Write(value)
+
+                // Replace old valog with new one
+                File.Delete(valog.Path)
+                File.Move(tempValogPath, valog.Path)
+
+                // Reopen the Valog instance with the new file to get its updated state
+                match Valog.Create(valog.Path) with
+                | Ok newValog ->
+                    printfn "Valog GC: Successfully replaced Valog file."
+                    return Some(Ok(newValog, remappedLocations))
+                | Error msg ->
+                    printfn "Valog GC Error: Failed to re-open Valog after GC: %s" msg
+                    return Some(Error msg)
+
+            with ex ->
+                printfn "Valog GC Error: %s" ex.Message
+                // Clean up temp file in case of error
+                if File.Exists(tempValogPath) then
+                    File.Delete(tempValogPath)
+
+                return Some(Error ex.Message)
+        }

@@ -9,13 +9,15 @@ open System.IO
 open System
 open System.Text
 open Ocis.Utils.ByteArrayComparer
+open Ocis.ValueLocation
 
 // Messages for agents
 type CompactionMessage =
     | FlushMemtable of Memtbl // Message to flush an immutable memtable to SSTable
     | TriggerCompaction // Message to trigger a compaction cycle
+    | RecompactionForRemapped of Map<int64, int64> // New message to trigger recompaction for remapped value locations
 
-type GcMessage = | TriggerGC // Message to trigger garbage collection in Valog
+type GcMessage = | TriggerGC // Message to trigger garbage collection in Valog (Removed parameter)
 
 /// <summary>
 /// OcisDB represents the main WiscKey storage engine instance.
@@ -33,8 +35,13 @@ type OcisDB
         gcAgent: MailboxProcessor<GcMessage>,
         flushThreshold: int
     ) =
+    // Constants for compaction strategy
+    static let L0_COMPACTION_THRESHOLD = 5 // Number of Level 0 SSTables to trigger compaction
+    static let LEVEL_SIZE_MULTIPLIER = 10 // Each level is approximately 10 times larger than the previous one
+
     let mutable ssTables = ssTables
     let mutable currentMemtbl = currentMemtbl
+    let mutable valog = valog
 
     member _.Dir = dir
 
@@ -48,7 +55,10 @@ type OcisDB
         with get () = ssTables
         and set (tables: Map<int, SSTbl list>) = ssTables <- tables
 
-    member _.ValueLog = valog
+    member _.ValueLog
+        with get () = valog
+        and set (v: Valog) = valog <- v
+
     member _.WAL = wal
     member _.CompactionAgent = compactionAgent
     member _.GCAgent = gcAgent
@@ -73,7 +83,7 @@ type OcisDB
     /// </summary>
     static member private mergeSSTables
         (dbRef: OcisDB ref, sstblsToMerge: SSTbl list, targetLevel: int)
-        : Result<SSTbl option, string> =
+        : Result<SSTbl option * (byte array * ValueLocation) list, string> =
         try
             // Collect all key-value pairs from the SSTables, ordered by key and then timestamp (descending)
             let allEntries =
@@ -84,11 +94,13 @@ type OcisDB
 
             let mergedMemtbl = Memtbl()
             let mutable processedKeys = Set.empty<byte array> // Use a set to track processed keys
+            let mutable liveEntriesInNewSSTbl = ResizeArray<byte array * ValueLocation>() // To collect live entries for GC
 
             for (key, valueLoc, _) in allEntries do
                 if not (processedKeys.Contains(key)) then // Only process if key hasn't been processed yet
                     if valueLoc <> -1L then // Filter out deletion markers
                         mergedMemtbl.Add(key, valueLoc)
+                        liveEntriesInNewSSTbl.Add((key, valueLoc)) // Collect live entries for GC
 
                     processedKeys <- processedKeys.Add(key) // Mark key as processed
 
@@ -102,12 +114,255 @@ type OcisDB
                     SSTbl.Flush(mergedMemtbl, newSSTblPath, timestamp, targetLevel)
 
                 match SSTbl.Open(flushedSSTblPath) with
-                | Some newSSTbl -> Ok(Some newSSTbl)
+                | Some newSSTbl -> Ok(Some newSSTbl, liveEntriesInNewSSTbl |> List.ofSeq) // Return new SSTbl and live entries
                 | None -> Error(sprintf "Failed to open newly merged SSTable at %s" flushedSSTblPath)
             else
-                Ok None // No entries to merge or all were deletion markers
+                Ok(None, []) // No entries to merge, return None and empty list
         with ex ->
             Error(sprintf "Error merging SSTables: %s" ex.Message)
+
+    static member private compact
+        (dbRef: OcisDB ref, level: int, sstblsToMerge: SSTbl list, targetLevel: int)
+        : Result<SSTbl option * (byte array * ValueLocation) list, string> =
+        OcisDB.mergeSSTables (dbRef, sstblsToMerge, targetLevel)
+
+    /// <summary>
+    /// Re-compacts an SSTable by updating its value locations based on a remapping map.
+    /// This is used after Valog garbage collection to update outdated value pointers.
+    /// </summary>
+    static member private recompactSSTable
+        (dbRef: OcisDB ref, sstbl: SSTbl, remappedLocations: Map<int64, int64>)
+        : Result<SSTbl option, string> =
+        try
+            let recompactedMemtbl = Memtbl()
+            let mutable changed = false
+
+            for KeyValue(key, originalValueLoc) in sstbl do
+                let newValueLoc =
+                    match remappedLocations.TryGetValue(originalValueLoc) with
+                    | true, newLoc ->
+                        changed <- true
+                        newLoc
+                    | false, _ -> originalValueLoc // Value not remapped
+
+                recompactedMemtbl.Add(key, newValueLoc)
+
+            if changed || recompactedMemtbl.Count <> 0 then // Only create new SSTbl if something changed or it's not empty after recompaction
+                let newSSTblPath =
+                    Path.Combine(dbRef.Value.Dir, $"sstbl-recompact-{Guid.NewGuid().ToString()}.sst") // Use a distinct name
+
+                let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                let level = sstbl.Level // Keep the same level
+
+                let flushedSSTblPath =
+                    SSTbl.Flush(recompactedMemtbl, newSSTblPath, timestamp, level)
+
+                match SSTbl.Open(flushedSSTblPath) with
+                | Some newSSTbl -> Ok(Some newSSTbl)
+                | None -> Error(sprintf "Failed to open recompacted SSTable at %s" flushedSSTblPath)
+            else
+                Ok None // No changes, no new SSTbl needed. Or all entries were deletion markers and didn't get added.
+        with ex ->
+            Error(sprintf "Error recompacting SSTable %s: %s" sstbl.Path ex.Message)
+
+    /// <summary>
+    /// Performs compaction for Level 0 SSTables.
+    /// </summary>
+    static member private compactLevel0(dbRef: OcisDB ref) : Async<unit> =
+        async {
+            let level0SSTablesOption = dbRef.Value.SSTables |> Map.tryFind 0
+
+            match level0SSTablesOption with
+            | Some level0SSTables when level0SSTables.Length >= L0_COMPACTION_THRESHOLD ->
+                // Select SSTables for merging (simplistic strategy: merge all L0 files for now)
+                let sstblsToMerge = level0SSTables
+                let targetLevel = 1 // Always merge L0 to L1
+
+                match OcisDB.compact (dbRef, 0, sstblsToMerge, targetLevel) with
+                | Ok(Some newSSTbl, liveEntries) ->
+                    // Update the SSTables map
+                    do!
+                        async { // Perform synchronous side effects
+                            let updatedSSTables =
+                                dbRef.Value.SSTables
+                                |> Map.remove 0 // Remove all old Level 0 SSTables
+                                |> Map.change targetLevel (fun currentListOption ->
+                                    match currentListOption with
+                                    | Some currentList -> Some(newSSTbl :: currentList)
+                                    | None -> Some [ newSSTbl ])
+
+                            dbRef.Value.SSTables <- updatedSSTables
+
+                            // Dispose and delete old SSTable files
+                            sstblsToMerge
+                            |> List.iter (fun sstbl ->
+                                (sstbl :> IDisposable).Dispose()
+                                File.Delete(sstbl.Path))
+
+                        // printfn
+                        //     "Compaction successful: Merged %d SSTables from Level 0 to Level 1."
+                        //     sstblsToMerge.Length
+                        }
+
+                | Ok(None, _) ->
+                    do!
+                        async { // Perform synchronous side effects
+                            // All entries were deletion markers, remove old SSTables
+                            dbRef.Value.SSTables <- dbRef.Value.SSTables |> Map.remove 0
+
+                            sstblsToMerge
+                            |> List.iter (fun sstbl ->
+                                (sstbl :> IDisposable).Dispose()
+                                File.Delete(sstbl.Path))
+
+                        // printfn
+                        //     "Compaction successful: Removed %d SSTables from Level 0 (all deletion markers)."
+                        //     sstblsToMerge.Length
+                        }
+                | Error msg -> printfn "Error during Level 0 compaction: %s" msg
+            | _ -> () // No compaction needed for Level 0
+        }
+
+    /// <summary>
+    /// Performs compaction for levels greater than 0 (Leveled Compaction).
+    /// This is a simplified version and will need to be expanded for full Leveled Compaction.
+    /// </summary>
+    static member private compactLevel(dbRef: OcisDB ref, level: int) : Async<unit> =
+        async {
+            let nextLevel = level + 1
+
+            let currentLevelSSTablesOption = dbRef.Value.SSTables |> Map.tryFind level
+            let nextLevelSSTablesOption = dbRef.Value.SSTables |> Map.tryFind nextLevel
+
+            match currentLevelSSTablesOption with
+            | Some currentLevelSSTables when not (currentLevelSSTables |> List.isEmpty) ->
+                // Calculate target size for the current level. For simplicity, we use L0_COMPACTION_THRESHOLD
+                // as a base and multiply it by LEVEL_SIZE_MULTIPLIER for subsequent levels.
+                let targetLevelSize =
+                    int64 L0_COMPACTION_THRESHOLD * (pown (int64 LEVEL_SIZE_MULTIPLIER) (level - 1))
+
+                let currentLevelTotalSize =
+                    currentLevelSSTables |> List.sumBy (fun sstbl -> sstbl.Size)
+
+                if currentLevelTotalSize >= targetLevelSize then
+                    // Pick the oldest SSTable from the current level to compact
+                    let sstblToCompact =
+                        currentLevelSSTables |> List.sortBy (fun s -> s.Timestamp) |> List.head
+
+                    // Find overlapping SSTables in the next level
+                    let overlappingSSTables =
+                        match nextLevelSSTablesOption with
+                        | Some nextLevelSSTables ->
+                            nextLevelSSTables |> List.filter (fun sstbl -> sstblToCompact.Overlaps(sstbl))
+                        | None -> []
+
+                    let sstblsToMerge = sstblToCompact :: overlappingSSTables
+
+                    match OcisDB.compact (dbRef, level, sstblsToMerge, nextLevel) with
+                    | Ok(Some newSSTbl, _) ->
+                        do!
+                            async { // Perform synchronous side effects
+                                let mutable updatedSSTables = dbRef.Value.SSTables
+
+                                // Remove sstblToCompact from current level
+                                updatedSSTables <-
+                                    updatedSSTables
+                                    |> Map.change level (fun currentListOption ->
+                                        match currentListOption with
+                                        | Some currentList ->
+                                            Some(currentList |> List.filter (fun s -> s.Path <> sstblToCompact.Path))
+                                        | None -> None)
+
+                                // Remove overlappingSSTables from next level
+                                updatedSSTables <-
+                                    updatedSSTables
+                                    |> Map.change nextLevel (fun nextListOption ->
+                                        match nextListOption with
+                                        | Some nextList ->
+                                            Some(
+                                                nextList
+                                                |> List.filter (fun s ->
+                                                    not (
+                                                        overlappingSSTables
+                                                        |> List.exists (fun os -> os.Path = s.Path)
+                                                    ))
+                                            )
+                                        | None -> None)
+
+                                // Add newSSTbl to next level
+                                updatedSSTables <-
+                                    updatedSSTables
+                                    |> Map.change nextLevel (fun currentListOption ->
+                                        match currentListOption with
+                                        | Some currentList -> Some(newSSTbl :: currentList)
+                                        | None -> Some [ newSSTbl ])
+
+                                dbRef.Value.SSTables <- updatedSSTables
+
+                                // Dispose and delete old SSTable files
+                                sstblsToMerge
+                                |> List.iter (fun sstbl ->
+                                    (sstbl :> IDisposable).Dispose()
+                                    File.Delete(sstbl.Path))
+
+                            // printfn
+                            //     "Compaction successful: Merged %d SSTables from Level %d to Level %d."
+                            //     sstblsToMerge.Length
+                            //     level
+                            //     nextLevel
+                            }
+
+                    | Ok(None, _) ->
+                        do!
+                            async { // Perform synchronous side effects
+                                // All entries were deletion markers, remove old SSTables
+                                let mutable updatedSSTables = dbRef.Value.SSTables
+
+                                updatedSSTables <-
+                                    updatedSSTables
+                                    |> Map.change level (fun currentListOption ->
+                                        match currentListOption with
+                                        | Some currentList ->
+                                            Some(currentList |> List.filter (fun s -> s.Path <> sstblToCompact.Path))
+                                        | None -> None)
+
+                                updatedSSTables <-
+                                    updatedSSTables
+                                    |> Map.change nextLevel (fun nextListOption ->
+                                        match nextListOption with
+                                        | Some nextList ->
+                                            Some(
+                                                nextList
+                                                |> List.filter (fun s ->
+                                                    not (
+                                                        overlappingSSTables
+                                                        |> List.exists (fun os -> os.Path = s.Path)
+                                                    ))
+                                            )
+                                        | None -> None)
+
+                                dbRef.Value.SSTables <- updatedSSTables
+
+                                sstblsToMerge
+                                |> List.iter (fun sstbl ->
+                                    (sstbl :> IDisposable).Dispose()
+                                    File.Delete(sstbl.Path))
+
+                            // printfn
+                            //     "Compaction successful: Removed %d SSTables from Level %d (all deletion markers)."
+                            //     sstblsToMerge.Length
+                            //     level
+                            }
+                    | Error msg -> printfn "Error during Level %d compaction: %s" level msg
+                else
+                    // printfn
+                    //     "Level %d compaction not needed (total size %d < target %d)."
+                    //     level
+                    //     currentLevelTotalSize
+                    //     targetLevelSize
+                    ()
+            | _ -> () // printfn "Level %d has no SSTables or is empty, no compaction needed." level
+        }
 
     /// <summary>
     /// Background agent for handling Memtable flushing to SSTables and Compaction.
@@ -133,14 +388,13 @@ type OcisDB
                         match SSTbl.Open(flushedSSTblPath) with
                         | Some sstbl ->
                             // Update the SSTables map in the OcisDB instance
-                            dbRef.Value.SSTables <-  // 直接赋值给可变属性
+                            dbRef.Value.SSTables <-
                                 dbRef.Value.SSTables
                                 |> Map.change level (fun currentListOption ->
                                     match currentListOption with
                                     | Some currentList -> Some(sstbl :: currentList)
                                     | None -> Some [ sstbl ])
 
-                            // printfn "Memtable flushed to SSTable: %s" flushedSSTblPath
                             // After flushing, check if compaction is needed
                             mailbox.Post(TriggerCompaction)
                         | None -> printfn "Error: Failed to open flushed SSTable at %s" flushedSSTblPath
@@ -148,64 +402,42 @@ type OcisDB
                         printfn "Error flushing Memtable to SSTable: %s" ex.Message
 
                 | TriggerCompaction ->
-                    do!
-                        async { // Wrap the entire compaction logic in an async block
-                            let level0SSTablesOption = dbRef.Value.SSTables |> Map.tryFind 0
+                    do! OcisDB.compactLevel0 dbRef // Try to compact Level 0 first
 
-                            match level0SSTablesOption with
-                            | Some level0SSTables when level0SSTables.Length >= 5 ->
-                                // Select the first 5 SSTables for merging (simplistic strategy)
-                                let sstblsToMerge = level0SSTables |> List.take 5
-                                let remainingSSTables = level0SSTables |> List.skip 5
+                    // Iterate through other levels and trigger compaction as needed
+                    // For a more robust implementation, define a MAX_LEVEL or dynamically handle it.
+                    // For demonstration, let's assume we have Levels 0, 1, 2 for now.
+                    for level = 1 to 2 do // Example: compact Levels 1 and 2
+                        do! OcisDB.compactLevel (dbRef, level) // Explicitly tuple arguments
 
-                                match OcisDB.mergeSSTables (dbRef, sstblsToMerge, 1) with // Merge to Level 1
-                                | Ok(Some newSSTbl) ->
-                                    do // Perform synchronous side effects
-                                        let updatedSSTables =
-                                            dbRef.Value.SSTables
-                                            |> Map.add 0 remainingSSTables // Keep remaining Level 0 SSTables
-                                            |> Map.change 1 (fun currentListOption ->
-                                                match currentListOption with
-                                                | Some currentList -> Some(newSSTbl :: currentList)
-                                                | None -> Some [ newSSTbl ])
+                    return ()
 
-                                        dbRef.Value.SSTables <- updatedSSTables
+                | RecompactionForRemapped remappedLocations ->
+                    // printfn "Received recompaction request for %d remapped locations." remappedLocations.Count
+                    let mutable updatedSSTables = dbRef.Value.SSTables
+                    let mutable recompactedCount = 0
 
-                                        // Dispose and delete old SSTable files
-                                        sstblsToMerge
-                                        |> List.iter (fun sstbl ->
-                                            (sstbl :> IDisposable).Dispose()
-                                            File.Delete(sstbl.Path))
+                    for level, sstblList in dbRef.Value.SSTables |> Map.toSeq do
+                        let mutable newSSTblList = ResizeArray<SSTbl>()
 
-                                        // printfn
-                                        //     "Compaction successful: Merged %d SSTables to Level 1."
-                                        //     sstblsToMerge.Length
-                                        ()
+                        for sstbl in sstblList do
+                            match OcisDB.recompactSSTable (dbRef, sstbl, remappedLocations) with
+                            | Ok(Some newSSTbl) ->
+                                newSSTblList.Add(newSSTbl)
+                                (sstbl :> IDisposable).Dispose()
+                                File.Delete(sstbl.Path)
+                                recompactedCount <- recompactedCount + 1
+                            // printfn "Recompacted SSTable %s to %s (Level %d)" sstbl.Path newSSTbl.Path level
+                            | Ok None -> newSSTblList.Add(sstbl) // No change, keep original SSTable
+                            | Error msg ->
+                                printfn "Error recompacting SSTable %s: %s" sstbl.Path msg
+                                newSSTblList.Add(sstbl) // On error, keep original SSTable
 
-                                | Ok None ->
-                                    do // Perform synchronous side effects
-                                        let updatedSSTables = dbRef.Value.SSTables |> Map.add 0 remainingSSTables
-                                        dbRef.Value.SSTables <- updatedSSTables
+                        updatedSSTables <- updatedSSTables |> Map.add level (newSSTblList |> List.ofSeq)
 
-                                        sstblsToMerge
-                                        |> List.iter (fun sstbl ->
-                                            (sstbl :> IDisposable).Dispose()
-                                            File.Delete(sstbl.Path))
-
-                                        // printfn
-                                        //     "Compaction successful: Removed %d SSTables (all deletion markers)."
-                                        //     sstblsToMerge.Length
-                                        ()
-
-                                | Error msg ->
-                                    do // Perform synchronous side effects
-                                        printfn "Error during compaction: %s" msg
-                            | _ ->
-                                // No compaction needed or not enough SSTables in Level 0
-                                return () // Explicitly return unit in an async block
-                        }
-        // In a real implementation, this would involve selecting SSTables,
-        // merging them, and updating the SSTables map.
+                    dbRef.Value.SSTables <- updatedSSTables
+                    // printfn "Completed recompaction for Valog GC. Recompacted %d SSTables." recompactedCount
+                    return ()
         }
 
     /// <summary>
@@ -217,10 +449,46 @@ type OcisDB
                 let! msg = mailbox.Receive()
 
                 match msg with
-                | TriggerGC -> printfn "Triggering garbage collection (simplified)."
-        // This is where Valog GC logic would go.
-        // This typically happens during compaction or as a separate process
-        // that identifies unreferenced values in the Valog and reclaims space.
+                | TriggerGC ->
+                    // printfn "Triggering garbage collection."
+
+                    // Collect all live value locations
+                    let mutable liveLocations = Set.empty<int64>
+
+                    // From CurrentMemtbl
+                    dbRef.Value.CurrentMemtbl
+                    |> Seq.iter (fun (KeyValue(_, valueLoc)) -> liveLocations <- liveLocations.Add(valueLoc))
+
+                    // From ImmutableMemtbl
+                    dbRef.Value.ImmutableMemtbl
+                    |> Seq.collect (fun memtbl -> memtbl |> Seq.map (fun (KeyValue(_, valueLoc)) -> valueLoc))
+                    |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add(valueLoc))
+
+                    // From SSTables
+                    dbRef.Value.SSTables
+                    |> Map.toSeq
+                    |> Seq.collect (fun (_, sstblList) ->
+                        sstblList
+                        |> Seq.collect (fun sstbl -> sstbl |> Seq.map (fun (KeyValue(_, valueLoc)) -> valueLoc)))
+                    |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add(valueLoc))
+
+                    // printfn "Collected %d live value locations." liveLocations.Count
+
+                    // Perform actual garbage collection in Valog
+                    let! remappedLocationsOption = Valog.CollectGarbage(dbRef.Value.ValueLog, liveLocations)
+
+                    match remappedLocationsOption with
+                    | Some(Ok(newValog, remappedLocations)) ->
+                        dbRef.Value.ValueLog <- newValog // Update the Valog instance in OcisDB
+
+                        // printfn
+                        //     "Valog GC: Values were moved, %d value locations remapped. Affected SSTables might need re-compaction to update pointers."
+                        //     remappedLocations.Count
+
+                        dbRef.Value.CompactionAgent.Post(RecompactionForRemapped(remappedLocations)) // Trigger recompaction
+                    | Some(Error msg) -> printfn "Valog GC Error: %s" msg
+                    | None -> printfn "Valog GC: No values were moved or no remapping needed."
+
         }
 
     /// <summary>
