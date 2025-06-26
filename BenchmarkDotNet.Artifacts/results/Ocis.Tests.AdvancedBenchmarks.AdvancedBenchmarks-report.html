@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>Ocis.Tests.AdvancedBenchmarks.AdvancedBenchmarks-20250626-150104</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.2, Linux openSUSE Tumbleweed
+AMD Ryzen 7 8845HS w/ Radeon 780M Graphics 5.14GHz, 1 CPU, 16 logical and 8 physical cores
+.NET SDK 9.0.301
+  [Host]   : .NET 9.0.6 (9.0.625.26613), X64 AOT AVX-512F+CD+BW+DQ+VL+VBMI DEBUG
+  ShortRun : .NET 9.0.6 (9.0.625.26613), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Job=ShortRun  InvocationCount=1  IterationCount=3  
+LaunchCount=1  UnrollFactor=1  WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method            </th><th>DataSize</th><th>HotDataRatio</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Gen1</th><th>Gen2</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>LayeredWrite</td><td>10000</td><td>0.2</td><td>419.0 ms</td><td>71.57 ms</td><td>3.92 ms</td><td>3000.0000</td><td>1000.0000</td><td>-</td><td>27.2 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>10000</td><td>0.2</td><td>426.4 ms</td><td>102.49 ms</td><td>5.62 ms</td><td>4000.0000</td><td>1000.0000</td><td>-</td><td>33.29 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>10000</td><td>0.2</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td>
+</tr><tr><td>RealisticWorkload</td><td>10000</td><td>0.2</td><td>413.4 ms</td><td>158.12 ms</td><td>8.67 ms</td><td>3000.0000</td><td>-</td><td>-</td><td>29.8 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>10000</td><td>0.2</td><td>1,421.0 ms</td><td>62.45 ms</td><td>3.42 ms</td><td>4000.0000</td><td>2000.0000</td><td>-</td><td>32.16 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>10000</td><td>0.2</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td>
+</tr><tr><td>LayeredWrite</td><td>10000</td><td>0.5</td><td>415.3 ms</td><td>59.80 ms</td><td>3.28 ms</td><td>3000.0000</td><td>1000.0000</td><td>-</td><td>27.6 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>10000</td><td>0.5</td><td>419.5 ms</td><td>124.01 ms</td><td>6.80 ms</td><td>4000.0000</td><td>-</td><td>-</td><td>37.74 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>10000</td><td>0.5</td><td>408.2 ms</td><td>178.53 ms</td><td>9.79 ms</td><td>3000.0000</td><td>1000.0000</td><td>-</td><td>27.03 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>10000</td><td>0.5</td><td>413.1 ms</td><td>68.45 ms</td><td>3.75 ms</td><td>3000.0000</td><td>-</td><td>-</td><td>29.54 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>10000</td><td>0.5</td><td>1,423.6 ms</td><td>47.08 ms</td><td>2.58 ms</td><td>4000.0000</td><td>2000.0000</td><td>-</td><td>32.02 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>10000</td><td>0.5</td><td>433.6 ms</td><td>112.05 ms</td><td>6.14 ms</td><td>12000.0000</td><td>10000.0000</td><td>8000.0000</td><td>37.66 MB</td>
+</tr><tr><td>LayeredWrite</td><td>10000</td><td>0.8</td><td>410.7 ms</td><td>60.19 ms</td><td>3.30 ms</td><td>3000.0000</td><td>1000.0000</td><td>-</td><td>27.18 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>10000</td><td>0.8</td><td>426.4 ms</td><td>46.23 ms</td><td>2.53 ms</td><td>5000.0000</td><td>1000.0000</td><td>-</td><td>43.38 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>10000</td><td>0.8</td><td>411.7 ms</td><td>19.35 ms</td><td>1.06 ms</td><td>3000.0000</td><td>1000.0000</td><td>-</td><td>27.24 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>10000</td><td>0.8</td><td>416.2 ms</td><td>85.35 ms</td><td>4.68 ms</td><td>3000.0000</td><td>-</td><td>-</td><td>30.82 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>10000</td><td>0.8</td><td>1,428.7 ms</td><td>147.87 ms</td><td>8.11 ms</td><td>4000.0000</td><td>1000.0000</td><td>-</td><td>31.88 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>10000</td><td>0.8</td><td>434.4 ms</td><td>39.74 ms</td><td>2.18 ms</td><td>12000.0000</td><td>10000.0000</td><td>8000.0000</td><td>37.52 MB</td>
+</tr><tr><td>LayeredWrite</td><td>50000</td><td>0.2</td><td>824.1 ms</td><td>227.16 ms</td><td>12.45 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>147.56 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>50000</td><td>0.2</td><td>859.6 ms</td><td>236.92 ms</td><td>12.99 ms</td><td>24000.0000</td><td>8000.0000</td><td>1000.0000</td><td>188.67 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>50000</td><td>0.2</td><td>865.9 ms</td><td>560.44 ms</td><td>30.72 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>148.52 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>50000</td><td>0.2</td><td>901.6 ms</td><td>544.34 ms</td><td>29.84 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>152.51 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>50000</td><td>0.2</td><td>1,892.1 ms</td><td>1,067.17 ms</td><td>58.49 ms</td><td>19000.0000</td><td>6000.0000</td><td>-</td><td>155.62 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>50000</td><td>0.2</td><td>911.2 ms</td><td>128.19 ms</td><td>7.03 ms</td><td>27000.0000</td><td>14000.0000</td><td>8000.0000</td><td>162.46 MB</td>
+</tr><tr><td>LayeredWrite</td><td>50000</td><td>0.5</td><td>818.9 ms</td><td>341.40 ms</td><td>18.71 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>148.92 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>50000</td><td>0.5</td><td>873.4 ms</td><td>129.81 ms</td><td>7.12 ms</td><td>28000.0000</td><td>8000.0000</td><td>1000.0000</td><td>218.22 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>50000</td><td>0.5</td><td>810.2 ms</td><td>148.32 ms</td><td>8.13 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>148.41 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>50000</td><td>0.5</td><td>826.9 ms</td><td>298.97 ms</td><td>16.39 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>152.35 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>50000</td><td>0.5</td><td>1,843.0 ms</td><td>204.26 ms</td><td>11.20 ms</td><td>19000.0000</td><td>6000.0000</td><td>-</td><td>154.93 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>50000</td><td>0.5</td><td>919.4 ms</td><td>380.41 ms</td><td>20.85 ms</td><td>27000.0000</td><td>14000.0000</td><td>8000.0000</td><td>161.19 MB</td>
+</tr><tr><td>LayeredWrite</td><td>50000</td><td>0.8</td><td>807.2 ms</td><td>185.81 ms</td><td>10.18 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>148.33 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>50000</td><td>0.8</td><td>913.9 ms</td><td>536.72 ms</td><td>29.42 ms</td><td>31000.0000</td><td>9000.0000</td><td>1000.0000</td><td>242.95 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>50000</td><td>0.8</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td>
+</tr><tr><td>RealisticWorkload</td><td>50000</td><td>0.8</td><td>813.6 ms</td><td>172.22 ms</td><td>9.44 ms</td><td>18000.0000</td><td>5000.0000</td><td>-</td><td>151.29 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>50000</td><td>0.8</td><td>1,820.5 ms</td><td>134.50 ms</td><td>7.37 ms</td><td>18000.0000</td><td>6000.0000</td><td>-</td><td>154.24 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>50000</td><td>0.8</td><td>926.6 ms</td><td>176.28 ms</td><td>9.66 ms</td><td>27000.0000</td><td>14000.0000</td><td>8000.0000</td><td>160.38 MB</td>
+</tr><tr><td>LayeredWrite</td><td>100000</td><td>0.2</td><td>1,367.9 ms</td><td>1,062.74 ms</td><td>58.25 ms</td><td>37000.0000</td><td>7000.0000</td><td>-</td><td>305.8 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>100000</td><td>0.2</td><td>1,507.9 ms</td><td>1,017.48 ms</td><td>55.77 ms</td><td>48000.0000</td><td>13000.0000</td><td>1000.0000</td><td>384.79 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>100000</td><td>0.2</td><td>1,399.7 ms</td><td>1,127.70 ms</td><td>61.81 ms</td><td>37000.0000</td><td>7000.0000</td><td>-</td><td>305.81 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>100000</td><td>0.2</td><td>1,376.1 ms</td><td>539.86 ms</td><td>29.59 ms</td><td>38000.0000</td><td>8000.0000</td><td>-</td><td>312.63 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>100000</td><td>0.2</td><td>2,366.9 ms</td><td>259.19 ms</td><td>14.21 ms</td><td>38000.0000</td><td>10000.0000</td><td>-</td><td>314.8 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>100000</td><td>0.2</td><td>1,636.6 ms</td><td>1,235.96 ms</td><td>67.75 ms</td><td>46000.0000</td><td>19000.0000</td><td>9000.0000</td><td>322.41 MB</td>
+</tr><tr><td>LayeredWrite</td><td>100000</td><td>0.5</td><td>1,340.5 ms</td><td>334.31 ms</td><td>18.32 ms</td><td>37000.0000</td><td>8000.0000</td><td>-</td><td>307.12 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>100000</td><td>0.5</td><td>1,578.9 ms</td><td>1,195.74 ms</td><td>65.54 ms</td><td>54000.0000</td><td>13000.0000</td><td>1000.0000</td><td>434.59 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>100000</td><td>0.5</td><td>1,355.8 ms</td><td>250.50 ms</td><td>13.73 ms</td><td>37000.0000</td><td>8000.0000</td><td>-</td><td>306.53 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>100000</td><td>0.5</td><td>1,325.0 ms</td><td>51.16 ms</td><td>2.80 ms</td><td>39000.0000</td><td>9000.0000</td><td>1000.0000</td><td>313.33 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>100000</td><td>0.5</td><td>2,402.1 ms</td><td>768.53 ms</td><td>42.13 ms</td><td>38000.0000</td><td>9000.0000</td><td>-</td><td>313.43 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>100000</td><td>0.5</td><td>1,545.9 ms</td><td>1,471.10 ms</td><td>80.64 ms</td><td>46000.0000</td><td>16000.0000</td><td>9000.0000</td><td>317.37 MB</td>
+</tr><tr><td>LayeredWrite</td><td>100000</td><td>0.8</td><td>1,342.0 ms</td><td>532.25 ms</td><td>29.17 ms</td><td>37000.0000</td><td>7000.0000</td><td>-</td><td>305.19 MB</td>
+</tr><tr><td>CrossSSTableRead</td><td>100000</td><td>0.8</td><td>1,781.7 ms</td><td>2,172.96 ms</td><td>119.11 ms</td><td>61000.0000</td><td>17000.0000</td><td>1000.0000</td><td>486.62 MB</td>
+</tr><tr><td>RangeQueryAcrossSSTables</td><td>100000</td><td>0.8</td><td>1,415.4 ms</td><td>1,861.78 ms</td><td>102.05 ms</td><td>38000.0000</td><td>10000.0000</td><td>1000.0000</td><td>303.57 MB</td>
+</tr><tr><td>RealisticWorkload</td><td>100000</td><td>0.8</td><td>1,500.5 ms</td><td>349.34 ms</td><td>19.15 ms</td><td>38000.0000</td><td>8000.0000</td><td>-</td><td>311.98 MB</td>
+</tr><tr><td>PostCompactionRead</td><td>100000</td><td>0.8</td><td>2,409.6 ms</td><td>368.53 ms</td><td>20.20 ms</td><td>39000.0000</td><td>11000.0000</td><td>1000.0000</td><td>312.06 MB</td>
+</tr><tr><td>MemoryEfficiencyTest</td><td>100000</td><td>0.8</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>
