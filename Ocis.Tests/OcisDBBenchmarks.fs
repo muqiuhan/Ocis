@@ -37,7 +37,7 @@ type OcisDBBenchmarks() =
         if Directory.Exists(dbPath) then
             Directory.Delete(dbPath, true)
 
-        match OcisDB.Open(dbPath) with
+        match OcisDB.Open(dbPath, this.Count) with
         | Ok newDb -> db <- newDb
         | Error msg -> failwith $"Failed to open DB: {msg}"
 

@@ -13,6 +13,7 @@ type OcisDBTests() =
 
     let tempDir = "temp_ocisdb_tests"
     let mutable testDbPath = ""
+    let flushThreshold = 100
 
     [<SetUp>]
     member this.Setup() =
@@ -29,7 +30,7 @@ type OcisDBTests() =
 
     [<Test>]
     member this.``Open_ShouldCreateNewDBAndInitializeCorrectly``() =
-        match OcisDB.Open(testDbPath) with
+        match OcisDB.Open(testDbPath, flushThreshold) with
         | Ok db ->
             use db = db
             Assert.That(Directory.Exists(testDbPath), Is.True)
@@ -42,7 +43,7 @@ type OcisDBTests() =
 
     [<Test>]
     member this.``SetAndGet_ShouldPersistAndRetrieveData``() =
-        match OcisDB.Open(testDbPath) with
+        match OcisDB.Open(testDbPath, flushThreshold) with
         | Ok db ->
             use db = db
             let key = Encoding.UTF8.GetBytes("mykey")
@@ -61,7 +62,7 @@ type OcisDBTests() =
 
     [<Test>]
     member this.``SetAndGet_ShouldHandleUpdates``() =
-        match OcisDB.Open(testDbPath) with
+        match OcisDB.Open(testDbPath, flushThreshold) with
         | Ok db ->
             use db = db
             let key = Encoding.UTF8.GetBytes("updatekey")
@@ -81,7 +82,7 @@ type OcisDBTests() =
 
     [<Test>]
     member this.``Delete_ShouldMarkAsDeletedAndNotRetrieve``() =
-        match OcisDB.Open(testDbPath) with
+        match OcisDB.Open(testDbPath, flushThreshold) with
         | Ok db ->
             use db = db
             let key = Encoding.UTF8.GetBytes("deletekey")
@@ -110,7 +111,7 @@ type OcisDBTests() =
 
     [<Test>]
     member this.``Set_ShouldTriggerMemtableFlush``() =
-        match OcisDB.Open(testDbPath) with
+        match OcisDB.Open(testDbPath, flushThreshold) with
         | Ok db ->
             use db = db
             let flushThreshold = 100 // Defined in Ocis.fs
@@ -151,7 +152,7 @@ type OcisDBTests() =
 
     [<Test>]
     member this.``Close_ShouldDisposeAllResources``() =
-        let dbOption = OcisDB.Open(testDbPath)
+        let dbOption = OcisDB.Open(testDbPath, flushThreshold)
 
         match dbOption with
         | Ok db ->
@@ -192,7 +193,7 @@ type OcisDBTests() =
     [<TestCase(10000)>]
     [<TestCase(100000)>]
     member this.``MemoryFootprint_ShouldBeReasonable``(count: int) =
-        match OcisDB.Open(testDbPath) with
+        match OcisDB.Open(testDbPath, flushThreshold) with
         | Ok db ->
             use db = db
 

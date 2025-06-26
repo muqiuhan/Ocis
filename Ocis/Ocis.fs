@@ -8,6 +8,7 @@ open Ocis.WAL
 open System.IO
 open System
 open System.Text
+open Ocis.Utils.ByteArrayComparer
 
 // Messages for agents
 type CompactionMessage =
@@ -29,7 +30,8 @@ type OcisDB
         valog: Valog,
         wal: Wal,
         compactionAgent: MailboxProcessor<CompactionMessage>,
-        gcAgent: MailboxProcessor<GcMessage>
+        gcAgent: MailboxProcessor<GcMessage>,
+        flushThreshold: int
     ) =
     let mutable ssTables = ssTables
     let mutable currentMemtbl = currentMemtbl
@@ -63,6 +65,49 @@ type OcisDB
             // Dispose all SSTables
             this.SSTables
             |> Map.iter (fun _ sstblList -> sstblList |> List.iter (fun sstbl -> (sstbl :> IDisposable).Dispose()))
+
+    /// <summary>
+    /// Merges multiple SSTables into a new SSTable.
+    /// Handles duplicate keys by keeping the entry with the latest timestamp.
+    /// Filters out deletion markers (-1L).
+    /// </summary>
+    static member private mergeSSTables
+        (dbRef: OcisDB ref, sstblsToMerge: SSTbl list, targetLevel: int)
+        : Result<SSTbl option, string> =
+        try
+            // Collect all key-value pairs from the SSTables, ordered by key and then timestamp (descending)
+            let allEntries =
+                sstblsToMerge
+                |> List.collect (fun sstbl ->
+                    sstbl |> Seq.map (fun kvp -> kvp.Key, kvp.Value, sstbl.Timestamp) |> Seq.toList)
+                |> List.sortBy (fun (key, _, timestamp) -> key, -timestamp) // Sort by key, then by timestamp descending
+
+            let mergedMemtbl = Memtbl()
+            let mutable processedKeys = Set.empty<byte array> // Use a set to track processed keys
+
+            for (key, valueLoc, _) in allEntries do
+                if not (processedKeys.Contains(key)) then // Only process if key hasn't been processed yet
+                    if valueLoc <> -1L then // Filter out deletion markers
+                        mergedMemtbl.Add(key, valueLoc)
+
+                    processedKeys <- processedKeys.Add(key) // Mark key as processed
+
+            if mergedMemtbl.Count > 0 then
+                let newSSTblPath =
+                    Path.Combine(dbRef.Value.Dir, $"sstbl-{Guid.NewGuid().ToString()}.sst")
+
+                let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+
+                let flushedSSTblPath =
+                    SSTbl.Flush(mergedMemtbl, newSSTblPath, timestamp, targetLevel)
+
+                match SSTbl.Open(flushedSSTblPath) with
+                | Some newSSTbl -> Ok(Some newSSTbl)
+                | None -> Error(sprintf "Failed to open newly merged SSTable at %s" flushedSSTblPath)
+            else
+                Ok None // No entries to merge or all were deletion markers
+        with ex ->
+            Error(sprintf "Error merging SSTables: %s" ex.Message)
 
     /// <summary>
     /// Background agent for handling Memtable flushing to SSTables and Compaction.
@@ -103,10 +148,62 @@ type OcisDB
                         printfn "Error flushing Memtable to SSTable: %s" ex.Message
 
                 | TriggerCompaction ->
-                    // Compaction logic (simplified for now)
-                    // This is where more complex LevelDB/RocksDB like compaction strategies would go.
-                    // printfn "Triggering compaction (simplified)."
-                    ()
+                    do!
+                        async { // Wrap the entire compaction logic in an async block
+                            let level0SSTablesOption = dbRef.Value.SSTables |> Map.tryFind 0
+
+                            match level0SSTablesOption with
+                            | Some level0SSTables when level0SSTables.Length >= 5 ->
+                                // Select the first 5 SSTables for merging (simplistic strategy)
+                                let sstblsToMerge = level0SSTables |> List.take 5
+                                let remainingSSTables = level0SSTables |> List.skip 5
+
+                                match OcisDB.mergeSSTables (dbRef, sstblsToMerge, 1) with // Merge to Level 1
+                                | Ok(Some newSSTbl) ->
+                                    do // Perform synchronous side effects
+                                        let updatedSSTables =
+                                            dbRef.Value.SSTables
+                                            |> Map.add 0 remainingSSTables // Keep remaining Level 0 SSTables
+                                            |> Map.change 1 (fun currentListOption ->
+                                                match currentListOption with
+                                                | Some currentList -> Some(newSSTbl :: currentList)
+                                                | None -> Some [ newSSTbl ])
+
+                                        dbRef.Value.SSTables <- updatedSSTables
+
+                                        // Dispose and delete old SSTable files
+                                        sstblsToMerge
+                                        |> List.iter (fun sstbl ->
+                                            (sstbl :> IDisposable).Dispose()
+                                            File.Delete(sstbl.Path))
+
+                                        // printfn
+                                        //     "Compaction successful: Merged %d SSTables to Level 1."
+                                        //     sstblsToMerge.Length
+                                        ()
+
+                                | Ok None ->
+                                    do // Perform synchronous side effects
+                                        let updatedSSTables = dbRef.Value.SSTables |> Map.add 0 remainingSSTables
+                                        dbRef.Value.SSTables <- updatedSSTables
+
+                                        sstblsToMerge
+                                        |> List.iter (fun sstbl ->
+                                            (sstbl :> IDisposable).Dispose()
+                                            File.Delete(sstbl.Path))
+
+                                        // printfn
+                                        //     "Compaction successful: Removed %d SSTables (all deletion markers)."
+                                        //     sstblsToMerge.Length
+                                        ()
+
+                                | Error msg ->
+                                    do // Perform synchronous side effects
+                                        printfn "Error during compaction: %s" msg
+                            | _ ->
+                                // No compaction needed or not enough SSTables in Level 0
+                                return () // Explicitly return unit in an async block
+                        }
         // In a real implementation, this would involve selecting SSTables,
         // merging them, and updating the SSTables map.
         }
@@ -131,7 +228,7 @@ type OcisDB
     /// </summary>
     /// <param name="dir">The directory where the database files are stored.</param>
     /// <returns>A Result type: Ok OcisDB instance if successful, otherwise an Error string.</returns>
-    static member Open(dir: string) : Result<OcisDB, string> =
+    static member Open(dir: string, flushThreshold: int) : Result<OcisDB, string> =
         try
             // Ensure the directory exists
             if not (Directory.Exists(dir)) then
@@ -185,7 +282,8 @@ type OcisDB
                             valog,
                             wal,
                             compactionAgent,
-                            gcAgent
+                            gcAgent,
+                            flushThreshold
                         )
 
                     dbRef.Value <- ocisDB // Update the mutable reference
@@ -220,7 +318,7 @@ type OcisDB
                 // Adding a simple workaround for demonstration. In Memtbl.fs, we'd add `member _.Count = memtbl.Count`
                 let memtblCount = currentMemtbl.Count
 
-                if memtblCount >= 100 then
+                if memtblCount >= flushThreshold then
                     let frozenMemtbl = currentMemtbl
                     immutableMemtbl.Enqueue(frozenMemtbl)
                     currentMemtbl <- Memtbl() // Create a new empty MemTable
@@ -305,7 +403,7 @@ type OcisDB
                 // Assuming Memtbl has a Count property or similar mechanism to get its size.
                 let memtblCount = currentMemtbl.Count
 
-                if memtblCount >= 100 then
+                if memtblCount >= flushThreshold then
                     let frozenMemtbl = currentMemtbl
                     immutableMemtbl.Enqueue(frozenMemtbl)
                     currentMemtbl <- Memtbl() // Create a new empty MemTable
