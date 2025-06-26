@@ -30,17 +30,16 @@ AMD Ryzen 7 8845HS w/ Radeon 780M Graphics 5.14GHz, 1 CPU, 16 logical and 8 phys
 
 Job=ShortRun  InvocationCount=1  IterationCount=3  
 LaunchCount=1  UnrollFactor=1  WarmupCount=3  
+
 ```
-
-| Method  | Count  | Mean         | Error        | StdDev      | Gen0        | Gen1      | Allocated  |
-|-------- |------- |-------------:|-------------:|------------:|------------:|----------:|-----------:|
-| **BulkSet** | **1000**   |     **9.039 ms** |    **10.121 ms** |   **0.5548 ms** |           **-** |         **-** |    **1.12 MB** |
-| BulkGet | 1000   |    13.136 ms |     9.329 ms |   0.5114 ms |           - |         - |    2.76 MB |
-| **BulkSet** | **10000**  |    **84.730 ms** |    **10.539 ms** |   **0.5777 ms** |   **1000.0000** |         **-** |   **11.24 MB** |
-| BulkGet | 10000  |   142.414 ms |   344.475 ms |  18.8818 ms |   6000.0000 | 1000.0000 |   51.78 MB |
-| **BulkSet** | **100000** |   **633.025 ms** |   **179.312 ms** |   **9.8287 ms** |  **13000.0000** | **1000.0000** |  **108.59 MB** |
-| BulkGet | 100000 | 5,826.877 ms | 3,263.841 ms | 178.9021 ms | 323000.0000 | 2000.0000 | 2578.38 MB |
-
+| Method  | Count  | Mean       | Error      | StdDev    | Gen0       | Gen1      | Allocated    |
+|-------- |------- |-----------:|-----------:|----------:|-----------:|----------:|-------------:|
+| **BulkSet** | **1000**   |   **9.629 ms** |  **23.165 ms** |  **1.270 ms** |          **-** |         **-** |   **1005.73 KB** |
+| BulkGet | 1000   |  12.701 ms |  19.301 ms |  1.058 ms |          - |         - |   2403.21 KB |
+| **BulkSet** | **10000**  | **100.723 ms** | **110.024 ms** |  **6.031 ms** |  **1000.0000** |         **-** |   **9955.27 KB** |
+| BulkGet | 10000  | 118.462 ms |  41.716 ms |  2.287 ms |  2000.0000 | 1000.0000 |  23907.48 KB |
+| **BulkSet** | **100000** | **650.189 ms** | **171.918 ms** |  **9.423 ms** | **11000.0000** |         **-** |  **95508.79 KB** |
+| BulkGet | 100000 | 734.871 ms | 260.082 ms | 14.256 ms | 28000.0000 | 2000.0000 | 234432.63 KB |
 
 **Note**: These figures represent memory allocated per *operation* during the benchmark run, not the total private memory size of the process. For persistent storage engines, actual memory consumption may vary depending on data volume and internal caching mechanisms.
 
