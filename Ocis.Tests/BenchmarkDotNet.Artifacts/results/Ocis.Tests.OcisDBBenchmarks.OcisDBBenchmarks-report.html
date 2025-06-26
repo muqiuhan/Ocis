@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>Ocis.Tests.OcisDBBenchmarks.OcisDBBenchmarks-20250626-095841</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.2, Linux openSUSE Tumbleweed
+AMD Ryzen 7 8845HS w/ Radeon 780M Graphics 5.14GHz, 1 CPU, 16 logical and 8 physical cores
+.NET SDK 9.0.301
+  [Host]   : .NET 9.0.6 (9.0.625.26613), X64 AOT AVX-512F+CD+BW+DQ+VL+VBMI DEBUG
+  ShortRun : .NET 9.0.6 (9.0.625.26613), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Job=ShortRun  InvocationCount=1  IterationCount=3  
+LaunchCount=1  UnrollFactor=1  WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method</th><th>Count</th><th>Mean  </th><th>Error </th><th>StdDev</th><th>Gen0 </th><th>Gen1</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>BulkSet</td><td>1000</td><td>9.039 ms</td><td>10.121 ms</td><td>0.5548 ms</td><td>-</td><td>-</td><td>1.12 MB</td>
+</tr><tr><td>BulkGet</td><td>1000</td><td>13.136 ms</td><td>9.329 ms</td><td>0.5114 ms</td><td>-</td><td>-</td><td>2.76 MB</td>
+</tr><tr><td>BulkSet</td><td>10000</td><td>84.730 ms</td><td>10.539 ms</td><td>0.5777 ms</td><td>1000.0000</td><td>-</td><td>11.24 MB</td>
+</tr><tr><td>BulkGet</td><td>10000</td><td>142.414 ms</td><td>344.475 ms</td><td>18.8818 ms</td><td>6000.0000</td><td>1000.0000</td><td>51.78 MB</td>
+</tr><tr><td>BulkSet</td><td>100000</td><td>633.025 ms</td><td>179.312 ms</td><td>9.8287 ms</td><td>13000.0000</td><td>1000.0000</td><td>108.59 MB</td>
+</tr><tr><td>BulkGet</td><td>100000</td><td>5,826.877 ms</td><td>3,263.841 ms</td><td>178.9021 ms</td><td>323000.0000</td><td>2000.0000</td><td>2578.38 MB</td>
+</tr></tbody></table>
+</body>
+</html>

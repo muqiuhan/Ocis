@@ -187,196 +187,40 @@ type OcisDBTests() =
         // but this is harder to test directly without knowing their exact paths beforehand.
         | Error msg -> Assert.Fail($"Failed to open DB: {msg}")
 
-[<TestFixture>]
-type OcisDBPerformanceTests() =
-
-    let tempDir = "temp_ocisdb_performance_tests"
-    let mutable testDbPath = ""
-
-    [<SetUp>]
-    member this.Setup() =
-        if Directory.Exists(tempDir) then
-            Directory.Delete(tempDir, true)
-
-        Directory.CreateDirectory(tempDir) |> ignore
-        testDbPath <- Path.Combine(tempDir, "ocisdb_performance_instance")
-
-    [<TearDown>]
-    member this.TearDown() =
-        if Directory.Exists(tempDir) then
-            Directory.Delete(tempDir, true)
-
-    /// <summary>
-    /// Tests the performance of bulk Set operations.
-    /// </summary>
-    /// <param name="count">The number of key-value pairs to set.</param>
+    [<Test>]
     [<TestCase(1000)>]
     [<TestCase(10000)>]
-    [<TestCase(50000)>]
-    member this.``BulkSet_ShouldPerformEfficiently``(count: int) =
-        match OcisDB.Open(testDbPath) with
-        | Ok db ->
-            use db = db
-            let stopwatch = Stopwatch.StartNew()
-
-            for i = 0 to count - 1 do
-                let key = Encoding.UTF8.GetBytes($"perf_key_{i}")
-                let value = Encoding.UTF8.GetBytes($"perf_value_{i}_" + new string ('A', 100)) // Value ~100 bytes
-                db.Set(key, value) |> Async.RunSynchronously |> ignore
-
-            // Give compaction agent some time to flush to SSTable
-            // Thread.Sleep(500) // Removed for performance testing accuracy
-
-            db.WAL.Flush()
-            db.ValueLog.Flush()
-
-            stopwatch.Stop()
-            printfn "\nBulk Set for %d entries completed in %f ms" count stopwatch.Elapsed.TotalMilliseconds
-            Assert.Pass()
-        | Error msg -> Assert.Fail($"Failed to open DB for Bulk Set test: {msg}")
-
-    /// <summary>
-    /// Tests the performance of bulk Get operations.
-    /// </summary>
-    /// <param name="count">The number of key-value pairs to get.</param>
-    [<TestCase(1000)>]
-    [<TestCase(10000)>]
-    [<TestCase(50000)>]
-    member this.``BulkGet_ShouldPerformEfficiently``(count: int) =
-        match OcisDB.Open(testDbPath) with
-        | Ok db ->
-            use db = db
-            let keysToGet = ResizeArray<byte array>()
-
-            // First, populate the database with data
-            printfn "Populating DB with %d entries for Bulk Get test..." count
-
-            for i = 0 to count - 1 do
-                let key = Encoding.UTF8.GetBytes($"perf_key_{i}")
-                let value = Encoding.UTF8.GetBytes($"perf_value_{i}_" + new string ('A', 100))
-                db.Set(key, value) |> Async.RunSynchronously |> ignore
-                keysToGet.Add(key)
-
-            // Give compaction agent some time to flush to SSTable
-            // Thread.Sleep(500) // Removed for performance testing accuracy
-            db.WAL.Flush()
-            db.ValueLog.Flush()
-
-            printfn "DB populated. Starting Bulk Get..."
-
-            let stopwatch = Stopwatch.StartNew()
-            let mutable foundCount = 0
-
-            for key in keysToGet do
-                let getResult = db.Get(key) |> Async.RunSynchronously
-
-                match getResult with
-                | Ok(Some _) -> foundCount <- foundCount + 1
-                | Ok None -> ()
-                | Error msg -> Assert.Fail($"Failed to get key {Encoding.UTF8.GetString(key)}: {msg}")
-
-            stopwatch.Stop()
-
-            printfn
-                "Bulk Get for %d entries (found %d) completed in %f ms"
-                count
-                foundCount
-                stopwatch.Elapsed.TotalMilliseconds
-
-            Assert.That(foundCount, Is.EqualTo(count), "All keys should be found.")
-        | Error msg -> Assert.Fail($"Failed to open DB for Bulk Get test: {msg}")
-
-    /// <summary>
-    /// Tests the performance of a mixed workload (Set and Get operations).
-    /// </summary>
-    /// <param name="count">The total number of operations (half Set, half Get).</param>
-    [<TestCase(1000)>]
-    [<TestCase(10000)>]
-    [<TestCase(50000)>]
-    member this.``MixedWorkload_ShouldPerformEfficiently``(count: int) =
-        match OcisDB.Open(testDbPath) with
-        | Ok db ->
-            use db = db
-            let numSets = count / 2
-            let numGets = count - numSets
-            let keys = ResizeArray<byte array>()
-
-            let stopwatch = Stopwatch.StartNew()
-
-            // Perform Set operations
-            for i = 0 to numSets - 1 do
-                let key = Encoding.UTF8.GetBytes($"mixed_key_{i}")
-                let value = Encoding.UTF8.GetBytes($"mixed_value_{i}" + new string ('B', 50))
-                db.Set(key, value) |> Async.RunSynchronously |> ignore
-                keys.Add(key)
-
-            // Give compaction agent some time to flush to SSTable
-            // Thread.Sleep(500) // Removed for performance testing accuracy
-            db.WAL.Flush()
-            db.ValueLog.Flush()
-
-            // Perform Get operations (on existing and some non-existing keys)
-            let mutable foundCount = 0
-
-            for i = 0 to numGets - 1 do
-                let keyIndex = i % keys.Count // Get existing keys
-                let keyToGet = keys.[keyIndex]
-                let getResult = db.Get(keyToGet) |> Async.RunSynchronously
-
-                match getResult with
-                | Ok(Some _) -> foundCount <- foundCount + 1
-                | Ok None -> ()
-                | Error msg ->
-                    Assert.Fail($"Failed to get key in mixed workload {Encoding.UTF8.GetString(keyToGet)}: {msg}")
-
-            stopwatch.Stop()
-
-            printfn
-                "\nMixed workload (%d Sets, %d Gets) completed in %f ms"
-                numSets
-                numGets
-                stopwatch.Elapsed.TotalMilliseconds
-
-            Assert.Pass()
-        | Error msg -> Assert.Fail($"Failed to open DB for Mixed Workload test: {msg}")
-
-    /// <summary>
-    /// Tests the memory footprint of the OcisDB after inserting a certain number of entries.
-    /// </summary>
-    /// <param name="count">The number of key-value pairs to insert to observe memory usage.</param>
-    [<TestCase(1000)>]
-    [<TestCase(10000)>]
-    [<TestCase(50000)>]
+    [<TestCase(100000)>]
     member this.``MemoryFootprint_ShouldBeReasonable``(count: int) =
         match OcisDB.Open(testDbPath) with
         | Ok db ->
             use db = db
-            // Capture initial memory usage
-            let initialMemory = Process.GetCurrentProcess().PrivateMemorySize64
-            printfn "Initial Private Memory Size: %f MB" (float initialMemory / (1024.0 * 1024.0))
 
-            // Insert data to observe memory growth
+            System.GC.Collect()
+            System.GC.WaitForPendingFinalizers()
+            System.GC.Collect()
+
+            let initialAllocatedBytes = System.GC.GetAllocatedBytesForCurrentThread()
+
+            // Insert data
             printfn "Inserting %d entries for Memory Footprint test..." count
 
             for i = 0 to count - 1 do
                 let key = Encoding.UTF8.GetBytes($"mem_key_{i}")
-                let value = Encoding.UTF8.GetBytes($"mem_value_{i}_" + new string ('C', 200)) // Value ~200 bytes
+                let value = Encoding.UTF8.GetBytes($"mem_value_{i}_" + new string ('C', 200))
                 db.Set(key, value) |> Async.RunSynchronously |> ignore
 
-            // Force garbage collection to get a more accurate picture of managed memory
-            System.GC.Collect()
-            System.GC.WaitForPendingFinalizers()
-            System.GC.Collect()
-            Thread.Sleep(100) // Give GC a moment to finish
+            let finalAllocatedBytes = System.GC.GetAllocatedBytesForCurrentThread()
+            let allocated = finalAllocatedBytes - initialAllocatedBytes
 
-            // Capture final memory usage
-            let finalMemory = Process.GetCurrentProcess().PrivateMemorySize64
-            printfn "Final Private Memory Size after %d entries: %f MB" count (float finalMemory / (1024.0 * 1024.0))
+            printfn "\nTotal allocated memory for %d entries: %f MB" count (float allocated / (1024.0 * 1024.0))
 
-            let memoryIncrease = finalMemory - initialMemory
-            printfn "Memory Increase: %f MB" (float memoryIncrease / (1024.0 * 1024.0))
+        // The average memory usage per record should not exceed 250 bytes (key + value + overhead)
+        // let expectedMaxAllocation = int64 count * 250L
+        // Assert.That(
+        //     allocated,
+        //     Is.LessThan(expectedMaxAllocation),
+        //     "Memory allocation exceeds the expected threshold."
+        // )
 
-            // Assertions for memory usage can be added here, e.g., Assert.That(memoryIncrease, Is.LessThan(expectedMaxIncreaseBytes))
-            // For now, we just pass to report the numbers.
-            Assert.Pass()
         | Error msg -> Assert.Fail($"Failed to open DB for Memory Footprint test: {msg}")

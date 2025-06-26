@@ -12,3 +12,4 @@ IMPL.md
 
 Ocis.Tests/TestResults/
 Ocis.sln.DotSettings.user
+Ocis.Tests/BenchmarkDotNet.Artifacts/*.log
