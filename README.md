@@ -22,6 +22,7 @@ Ocis leverages the features of the F# language to build a robust and efficient s
 ## Performance Benchmarks
 
 ```
+
 BenchmarkDotNet v0.15.2, Linux openSUSE Tumbleweed
 AMD Ryzen 7 8845HS w/ Radeon 780M Graphics 5.14GHz, 1 CPU, 16 logical and 8 physical cores
 .NET SDK 9.0.301
@@ -32,14 +33,15 @@ Job=ShortRun  InvocationCount=1  IterationCount=3
 LaunchCount=1  UnrollFactor=1  WarmupCount=3  
 
 ```
-| Method  | Count  | Mean       | Error      | StdDev    | Gen0       | Gen1      | Allocated    |
-|-------- |------- |-----------:|-----------:|----------:|-----------:|----------:|-------------:|
-| **BulkSet** | **1000**   |   **9.629 ms** |  **23.165 ms** |  **1.270 ms** |          **-** |         **-** |   **1005.73 KB** |
-| BulkGet | 1000   |  12.701 ms |  19.301 ms |  1.058 ms |          - |         - |   2403.21 KB |
-| **BulkSet** | **10000**  | **100.723 ms** | **110.024 ms** |  **6.031 ms** |  **1000.0000** |         **-** |   **9955.27 KB** |
-| BulkGet | 10000  | 118.462 ms |  41.716 ms |  2.287 ms |  2000.0000 | 1000.0000 |  23907.48 KB |
-| **BulkSet** | **100000** | **650.189 ms** | **171.918 ms** |  **9.423 ms** | **11000.0000** |         **-** |  **95508.79 KB** |
-| BulkGet | 100000 | 734.871 ms | 260.082 ms | 14.256 ms | 28000.0000 | 2000.0000 | 234432.63 KB |
+| Method      | Count      |           Mean |          Error |         StdDev |           Gen0 |      Gen1 |       Allocated |
+| ----------- | ---------- | -------------: | -------------: | -------------: | -------------: | --------: | --------------: |
+| **BulkSet** | **1000**   |   **9.526 ms** |   **3.969 ms** |  **0.2176 ms** |          **-** |     **-** |  **1004.95 KB** |
+| BulkGet     | 1000       |      13.117 ms |      11.373 ms |      0.6234 ms |              - |         - |      2403.21 KB |
+| **BulkSet** | **10000**  | **113.793 ms** | **148.250 ms** |  **8.1261 ms** |  **1000.0000** |     **-** |  **9950.24 KB** |
+| BulkGet     | 10000      |     122.123 ms |     264.695 ms |     14.5088 ms |      2000.0000 | 1000.0000 |     23907.48 KB |
+| **BulkSet** | **100000** | **705.837 ms** | **444.079 ms** | **24.3415 ms** | **11000.0000** |     **-** | **96533.24 KB** |
+| BulkGet     | 100000     |     742.808 ms |     247.308 ms |     13.5558 ms |     28000.0000 | 2000.0000 |    234432.63 KB |
+
 
 **Note**: These figures represent memory allocated per *operation* during the benchmark run, not the total private memory size of the process. For persistent storage engines, actual memory consumption may vary depending on data volume and internal caching mechanisms.
 
