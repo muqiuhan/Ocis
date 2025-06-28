@@ -17,6 +17,7 @@ type SSTbl
         timestamp: int64,
         level: int,
         fileStream: FileStream,
+        reader: BinaryReader,
         recordOffsets: int64 array,
         lowKey: byte array,
         highKey: byte array
@@ -26,6 +27,7 @@ type SSTbl
     member _.Timestamp = timestamp
     member _.Level = level
     member _.FileStream = fileStream
+    member _.Reader = reader
     member _.RecordOffsets = recordOffsets
     member _.LowKey = lowKey
     member _.HighKey = highKey
@@ -48,16 +50,20 @@ type SSTbl
 
     // Implement IDisposable interface, ensure that the FileStream is closed when the SSTbl object is no longer used.
     interface System.IDisposable with
-        member this.Dispose() = this.FileStream.Dispose()
+        member this.Dispose() =
+            this.Reader.Dispose()
+            this.FileStream.Dispose()
 
     // Implement IEnumerable<KeyValuePair<byte array, ValueLocation>>
     interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
         member this.GetEnumerator() =
             // Helper function to read a key-value pair from the stream at a given offset
-            let readKeyValuePair (stream: FileStream, offset: int64) : KeyValuePair<byte array, ValueLocation> =
+            let readKeyValuePair
+                (stream: FileStream, reader: BinaryReader, offset: int64)
+                : KeyValuePair<byte array, ValueLocation> =
                 lock stream (fun () ->
                     stream.Seek(offset, SeekOrigin.Begin) |> ignore
-                    use reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true)
+                    // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
 
                     let key = Serialization.readByteArray reader
                     let valueLocation = Serialization.readValueLocation reader
@@ -66,7 +72,7 @@ type SSTbl
             // Create an enumerator that reads key-value pairs from the SSTable file
             (seq {
                 for offset in this.RecordOffsets do
-                    yield readKeyValuePair (this.FileStream, offset)
+                    yield readKeyValuePair (this.FileStream, this.Reader, offset)
             })
                 .GetEnumerator()
 
@@ -138,11 +144,12 @@ type SSTbl
     /// <returns>An Option type: Some SSTbl if successful, otherwise None.</returns>
     static member Open(path: string) : SSTbl option =
         let mutable fileStream: FileStream = null // Declare a mutable variable to close the stream in case of an exception
+        let mutable reader: BinaryReader = null
 
         try
             fileStream <- new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
             // BinaryReader uses the leaveOpen: true parameter to ensure that the FileStream is not closed when the BinaryReader is disposed
-            use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
+            reader <- new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
 
             // 1. Read footer (Footer)
             // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
@@ -168,15 +175,21 @@ type SSTbl
             for i = 0 to indexEntriesCount - 1 do
                 recordOffsets.[i] <- reader.ReadInt64()
 
-            Some(new SSTbl(path, timestamp, level, fileStream, recordOffsets, lowKey, highKey))
+            Some(new SSTbl(path, timestamp, level, fileStream, reader, recordOffsets, lowKey, highKey))
         with
         | :? FileNotFoundException ->
+            if reader <> null then
+                reader.Dispose()
+
             if fileStream <> null then
                 fileStream.Dispose() // Ensure the stream is closed when the file is not found
 
             None
         | ex ->
             printfn $"Error opening SSTable '{path}': {ex.Message}"
+
+            if reader <> null then
+                reader.Dispose()
 
             if fileStream <> null then
                 fileStream.Dispose() // Ensure the stream is closed when other exceptions occur
@@ -217,8 +230,6 @@ type SSTbl
                 // Move the read/write position of the FileStream to the current offset
                 fileStream.Seek(currentOffset, SeekOrigin.Begin) |> ignore
                 // Use BinaryReader to read data, with leaveOpen: true to ensure the underlying FileStream is not closed
-                use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
-
                 let currentKey = Serialization.readByteArray reader // Read the key at the current position
                 let cmp = ByteArrayComparer.ComparerInstance.Compare(key, currentKey) // Compare the target key and the current key
 

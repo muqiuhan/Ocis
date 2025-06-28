@@ -36,11 +36,13 @@ type OcisDB
         gcAgent: MailboxProcessor<GcMessage>,
         flushThreshold: int
     ) =
-    /// Number of Level 0 SSTables to trigger compaction
-    static let L0_COMPACTION_THRESHOLD = 5 
-    
+    /// Number of Level 0 SSTables to trigger compaction.
+    /// For write-intensive applications, this value can be appropriately increased to reduce the merge frequency.
+    /// For read-intensive applications, this value can be appropriately reduced to reduce the scan range of L0
+    static let L0_COMPACTION_THRESHOLD = 4
+
     /// Each level is approximately 10 times larger than the previous one
-    static let LEVEL_SIZE_MULTIPLIER = 10
+    static let LEVEL_SIZE_MULTIPLIER = 5
 
     let mutable ssTables = ssTables
     let mutable currentMemtbl = currentMemtbl
@@ -415,7 +417,7 @@ type OcisDB
                     // For a more robust implementation, define a MAX_LEVEL or dynamically handle it.
                     // For demonstration, let's assume we have Levels 0, 1, 2 for now.
                     for level = 1 to 2 do // Example: compact Levels 1 and 2
-                        do! OcisDB.compactLevel(dbRef, level)
+                        do! OcisDB.compactLevel (dbRef, level)
 
                     return ()
 

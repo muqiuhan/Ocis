@@ -14,11 +14,13 @@ open Ocis.ValueLocation
 /// Tail points to the oldest valid value (for garbage collection).
 /// Each entry contains the key and its length, so that it can be verified when reading.
 /// </remarks>
-type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
+type Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: BinaryWriter, head: int64, tail: int64) =
 
     let path: string = path
     /// The file stream for direct file operations. FileStream internally handles file pointers and buffers.
     let mutable fileStream: FileStream = fileStream
+    let mutable reader: BinaryReader = reader
+    let mutable writer: BinaryWriter = writer
     /// The next writable position, also represents the logical end of the file.
     let mutable head: int64 = head
     /// The position of the oldest valid value (for garbage collection). Data before this position is considered garbage.
@@ -26,8 +28,6 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
 
     member _.Path = path
     member _.FileStream = fileStream
-
-    member private _.SetFileStream(fs) = fileStream <- fs
 
     member _.Head
         with get () = head
@@ -38,7 +38,10 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
         and set value = tail <- value
 
     interface IDisposable with
-        member _.Dispose() = fileStream.Dispose()
+        member _.Dispose() =
+            writer.Dispose()
+            reader.Dispose()
+            fileStream.Dispose()
 
     /// <summary>
     /// Open or create a Value Log file.
@@ -60,7 +63,10 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
             // Initialize Tail to 0. The update of Tail is responsible for garbage collection (usually part of the Compaction process).
             let tail = 0L
 
-            Ok(new Valog(path, fileStream, head, tail))
+            let reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
+            let writer = new BinaryWriter(fileStream, System.Text.Encoding.UTF8, true)
+
+            Ok(new Valog(path, fileStream, reader, writer, head, tail))
         with ex ->
             Error($"Failed to open or create Value Log file '{path}': {ex.Message}")
 
@@ -82,9 +88,6 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
             fileStream.Seek(head, SeekOrigin.Begin) |> ignore
 
             // Use BinaryWriter to write data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryWriter is disposed.
-            use writer = new BinaryWriter(fileStream, System.Text.Encoding.UTF8, true)
-
-            // Write the length of the key and the key byte array
             writer.Write(key.Length)
             writer.Write(key) // BinaryWriter directly supports writing byte array
 
@@ -113,9 +116,6 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
                     fileStream.Seek(location, SeekOrigin.Begin) |> ignore
 
                     // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
-                    use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
-
-                    // Read the length of the key and the key byte array
                     let keyLength = reader.ReadInt32()
                     let key = reader.ReadBytes(keyLength)
 
