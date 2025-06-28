@@ -8,7 +8,7 @@ open System
 /// F# Map requires a reliable comparer to correctly sort and find byte array keys,
 /// because the default comparison is based on reference rather than content.
 /// </summary>
-type ByteArrayComparer() =
+type ByteArrayComparer () =
     interface IComparer<byte array> with
         /// <summary>
         /// Compare two byte arrays.
@@ -20,10 +20,9 @@ type ByteArrayComparer() =
         /// If lhs is greater than rhs, return a positive number;
         /// If both are equal, return 0.
         /// </returns>
-        member _.Compare(lhs: byte array, rhs: byte array) =
-            System.ReadOnlySpan<byte>(lhs).SequenceCompareTo(System.ReadOnlySpan<byte>(rhs))
+        member _.Compare (lhs : byte array, rhs : byte array) =
+            System.ReadOnlySpan<byte>(lhs).SequenceCompareTo (System.ReadOnlySpan<byte> (rhs))
 
-    member inline this.Compare(lhs: byte array, rhs: byte array) =
-        (this :> IComparer<byte array>).Compare(lhs, rhs)
+    member inline this.Compare (lhs : byte array, rhs : byte array) = (this :> IComparer<byte array>).Compare (lhs, rhs)
 
-    static member ComparerInstance = new ByteArrayComparer()
+    static member ComparerInstance = new ByteArrayComparer ()

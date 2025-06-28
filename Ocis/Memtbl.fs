@@ -15,17 +15,14 @@ open Ocis.ValueLocation
 /// When Memtbl reaches a certain size, it will be "frozen" and flushed to SSTable on disk.
 /// Reference: [https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf]
 /// </remarks>
-type Memtbl() =
-    let memtbl =
-        SortedDictionary<byte array, ValueLocation>(ByteArrayComparer.ComparerInstance)
+type Memtbl () =
+    let memtbl = SortedDictionary<byte array, ValueLocation> (ByteArrayComparer.ComparerInstance)
 
     interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
-        member _.GetEnumerator() =
-            memtbl.GetEnumerator() :> IEnumerator<KeyValuePair<byte array, ValueLocation>>
+        member _.GetEnumerator () = memtbl.GetEnumerator () :> IEnumerator<KeyValuePair<byte array, ValueLocation>>
 
     interface Collections.IEnumerable with
-        member _.GetEnumerator() =
-            memtbl.GetEnumerator() :> Collections.IEnumerator
+        member _.GetEnumerator () = memtbl.GetEnumerator () :> Collections.IEnumerator
 
     member _.Count = memtbl.Count
 
@@ -34,7 +31,7 @@ type Memtbl() =
     /// </summary>
     /// <param name="key">The key to add or update.</param>
     /// <param name="valueLocation">The value location to associate with the key.</param>
-    member this.Add(key: byte array, valueLocation: ValueLocation) : unit = memtbl.[key] <- valueLocation
+    member this.Add (key : byte array, valueLocation : ValueLocation) : unit = memtbl.[key] <- valueLocation
 
     /// <summary>
     /// Get the value location of the given key from Memtbl.
@@ -44,8 +41,8 @@ type Memtbl() =
     /// An Option type: Some ValueLocation if the key is found, otherwise None.
     /// This follows the idiomatic way of handling possible missing values in F#.
     /// </returns>
-    member _.TryGet(key: byte array) : ValueLocation option =
-        match memtbl.TryGetValue(key) with
+    member _.TryGet (key : byte array) : ValueLocation option =
+        match memtbl.TryGetValue (key) with
         | true, value -> Some value
         | false, _ -> None
 
@@ -57,11 +54,11 @@ type Memtbl() =
     /// </summary>
     /// <param name="key">The key to delete.</param>
     /// <returns>The updated Memtbl instance, which contains a deletion marker record.</returns>
-    member this.SafeDelete(key: byte array) : unit =
-        match this.TryGet(key) with
+    member this.SafeDelete (key : byte array) : unit =
+        match this.TryGet (key) with
         | Some _ ->
-            match memtbl.Remove(key) with
-            | true -> memtbl.Add(key, -1L)
+            match memtbl.Remove (key) with
+            | true -> memtbl.Add (key, -1L)
             | false -> failwith "Failed to delete key"
         | None -> failwith "Key not found"
 
@@ -69,4 +66,4 @@ type Memtbl() =
     /// Delete a key from Memtbl.
     /// </summary>
     /// <param name="key">The key to delete.</param>
-    member _.Delete(key: byte array) : unit = memtbl.[key] <- -1L
+    member _.Delete (key : byte array) : unit = memtbl.[key] <- -1L
