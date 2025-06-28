@@ -5,8 +5,9 @@ open Ocis.Utils.ByteArrayComparer
 open Ocis.Utils.Serialization
 open Ocis.ValueLocation
 open System.IO
-open System.Collections.Generic // For KeyValuePair
-open System.Collections // For Collections.IEnumerable
+open System.Collections.Generic
+open System.Collections
+open Ocis.Utils.Logger
 
 /// FileStream needs to be closed and released correctly after use (using the use keyword).
 /// RecordOffsets is a sparse index in memory, pointing to the starting position of each key-value pair in the SSTable file.
@@ -184,7 +185,7 @@ type SSTbl
 
             None
         | ex ->
-            printfn $"Error opening SSTable '{path}': {ex.Message}"
+            Logger.Error $"Error opening SSTable '{path}': {ex.Message}"
 
             if reader <> null then
                 reader.Dispose ()

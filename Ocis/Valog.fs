@@ -3,6 +3,7 @@ module Ocis.Valog
 open System
 open System.IO
 open Ocis.ValueLocation
+open Ocis.Utils.Logger
 
 /// <summary>
 /// Valog (Value Log) represents the append-only log file in WiscKey storage engine that stores actual values.
@@ -126,11 +127,11 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
                 with
                 | :? EndOfStreamException ->
                     // If the file is corrupted or the given position points to an incomplete entry (e.g., due to a crash), this may happen.
-                    printfn $"Warning: Reached the end of the stream when reading Value Log offset {location}."
+                    Logger.Warn $"Reached the end of the stream when reading Value Log offset {location}."
                     None
                 | ex ->
                     // Capture other potential I/O errors.
-                    printfn $"Error: An error occurred when reading Value Log offset {location}: {ex.Message}"
+                    Logger.Error $"An error occurred when reading Value Log offset {location}: {ex.Message}"
                     None)
 
     /// <summary>
@@ -171,7 +172,7 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
     /// <param name="valog">The Valog instance.</param>
     /// <param name="liveLocations">A set of ValueLocations that are currently live across all SSTables and Memtables.</param>
     static member CollectGarbage (valog : Valog, liveLocations : Set<int64>) : Async<Result<Valog * Map<int64, int64>, string> option> = async {
-        printfn $"Valog GC: Started. Received {liveLocations.Count} live locations."
+        Logger.Debug $"Valog GC: Started. Received {liveLocations.Count} live locations."
 
         let tempValogPath = valog.Path + ".temp"
         let mutable remappedLocations = Map.empty<int64, int64>
@@ -212,14 +213,14 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
             // Reopen the Valog instance with the new file to get its updated state
             match Valog.Create (valog.Path) with
             | Ok newValog ->
-                printfn "Valog GC: Successfully replaced Valog file."
+                Logger.Debug "Valog GC: Successfully replaced Valog file."
                 return Some (Ok (newValog, remappedLocations))
             | Error msg ->
-                printfn $"Valog GC Error: Failed to re-open Valog after GC: {msg}"
+                Logger.Error $"Valog GC Error: Failed to re-open Valog after GC: {msg}"
                 return Some (Error msg)
 
         with ex ->
-            printfn $"Valog GC Error: {ex.Message}"
+            Logger.Error $"Valog GC Error: {ex.Message}"
             // Clean up temp file in case of error
             if File.Exists (tempValogPath) then
                 File.Delete (tempValogPath)

@@ -11,6 +11,7 @@ open System.Text
 open Ocis.Utils.ByteArrayComparer
 open Ocis.ValueLocation
 open FSharp.Collections
+open Ocis.Utils.Logger
 
 // Messages for agents
 type CompactionMessage =
@@ -191,7 +192,7 @@ type OcisDB
         with ex ->
             Error ($"Error recompacting SSTable {sstbl.Path}: {ex.Message}")
 
-    /// <summary>
+    /// <summary>Config
     /// Performs compaction for Level 0 SSTables.
     /// </summary>
     static member private compactLevel0 (dbRef : OcisDB ref) : Async<unit> = async {
@@ -223,9 +224,7 @@ type OcisDB
                         (sstbl :> IDisposable).Dispose ()
                         File.Delete (sstbl.Path))
 
-                // printfn
-                //     "Compaction successful: Merged %d SSTables from Level 0 to Level 1."
-                //     sstblsToMerge.Length
+                    Logger.Debug $"Compaction successful: Merged {sstblsToMerge.Length} SSTables from Level 0 to Level 1."
                 }
 
             | Ok (None, _) ->
@@ -238,11 +237,9 @@ type OcisDB
                         (sstbl :> IDisposable).Dispose ()
                         File.Delete (sstbl.Path))
 
-                // printfn
-                //     "Compaction successful: Removed %d SSTables from Level 0 (all deletion markers)."
-                //     sstblsToMerge.Length
+                    Logger.Debug $"Compaction successful: Removed {sstblsToMerge.Length} SSTables from Level 0 (all deletion markers)."
                 }
-            | Error msg -> printfn $"Error during Level 0 compaction: {msg}"
+            | Error msg -> Logger.Error $"Error during Level 0 compaction: {msg}"
         | _ -> () // No compaction needed for Level 0
     }
 
@@ -353,10 +350,10 @@ type OcisDB
                             return () // This returns unit for the do! block
 
                         | Error msg ->
-                            printfn $"Error during Level {level} compaction: {msg}"
+                            Logger.Error $"Error during Level {level} compaction: {msg}"
                             return () // Returns unit
                     | None ->
-                        printfn $"Level {level}: No suitable SSTable found for compaction (max overlap size: {maxOverlapSize})."
+                        Logger.Error $"Level {level}: No suitable SSTable found for compaction (max overlap size: {maxOverlapSize})."
 
                         return () // Returns unit
                 else
@@ -396,9 +393,9 @@ type OcisDB
 
                         // After flushing, check if compaction is needed
                         mailbox.Post (TriggerCompaction)
-                    | None -> printfn $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
+                    | None -> Logger.Error $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
                 with ex ->
-                    printfn $"Error flushing Memtable to SSTable: {ex.Message}"
+                    Logger.Error $"Error flushing Memtable to SSTable: {ex.Message}"
 
             | TriggerCompaction ->
                 do! OcisDB.compactLevel0 dbRef // Try to compact Level 0 first
@@ -412,7 +409,7 @@ type OcisDB
                 return ()
 
             | RecompactionForRemapped remappedLocations ->
-                // printfn "Received recompaction request for %d remapped locations." remappedLocations.Count
+                Logger.Debug $"Received recompaction request for {remappedLocations.Count} remapped locations."
                 let mutable updatedSSTables = dbRef.Value.SSTables
                 let mutable recompactedCount = 0
 
@@ -426,10 +423,10 @@ type OcisDB
                             (sstbl :> IDisposable).Dispose ()
                             File.Delete (sstbl.Path)
                             recompactedCount <- recompactedCount + 1
-                        // printfn "Recompacted SSTable %s to %s (Level %d)" sstbl.Path newSSTbl.Path level
+                            Logger.Debug $"Recompacted SSTable {sstbl.Path} to {newSSTbl.Path} (Level {level})"
                         | Ok None -> newSSTblList.Add (sstbl) // No change, keep original SSTable
                         | Error msg ->
-                            printfn $"Error recompacting SSTable {sstbl.Path}: {msg}"
+                            Logger.Error $"Error recompacting SSTable {sstbl.Path}: {msg}"
                             newSSTblList.Add (sstbl) // On error, keep original SSTable
 
                     updatedSSTables <-
@@ -437,7 +434,7 @@ type OcisDB
                         |> Map.add level (newSSTblList |> List.ofSeq)
 
                 dbRef.Value.SSTables <- updatedSSTables
-                // printfn "Completed recompaction for Valog GC. Recompacted %d SSTables." recompactedCount
+                Logger.Debug $"Completed recompaction for Valog GC. Recompacted {recompactedCount} SSTables."
                 return ()
     }
 
@@ -450,7 +447,7 @@ type OcisDB
 
             match msg with
             | TriggerGC ->
-                // printfn "Triggering garbage collection."
+                Logger.Debug "Triggering garbage collection."
 
                 // Collect all live value locations
                 let mutable liveLocations = Set.empty<int64>
@@ -472,7 +469,7 @@ type OcisDB
                     |> Seq.collect (fun sstbl -> sstbl |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc)))
                 |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add (valueLoc))
 
-                // printfn "Collected %d live value locations." liveLocations.Count
+                Logger.Debug $"Collected {liveLocations.Count} live value locations."
 
                 // Perform actual garbage collection in Valog
                 let! remappedLocationsOption = Valog.CollectGarbage (dbRef.Value.ValueLog, liveLocations)
@@ -481,7 +478,7 @@ type OcisDB
                 | Some (Ok (newValog, remappedLocations)) ->
                     dbRef.Value.ValueLog <- newValog // Update the Valog instance in OcisDB
 
-                    printfn
+                    Logger.Debug
                         $"Valog GC: Values were moved, {remappedLocations.Count} value locations remapped. Affected SSTables might need re-compaction to update pointers."
 
                     // Merge new remappedLocations into pendingRemappedLocations
@@ -490,8 +487,8 @@ type OcisDB
 
                     // Trigger a compaction cycle to handle the remapping in affected SSTables
                     dbRef.Value.CompactionAgent.Post (TriggerCompaction) // Trigger general compaction
-                | Some (Error msg) -> printfn $"Valog GC Error: {msg}"
-                | None -> printfn "Valog GC: No values were moved or no remapping needed."
+                | Some (Error msg) -> Logger.Error $"Valog GC Error: {msg}"
+                | None -> Logger.Debug "Valog GC: No values were moved or no remapping needed."
 
     }
 
@@ -536,7 +533,7 @@ type OcisDB
                                     match currentListOption with
                                     | Some currentList -> Some (sstbl :: currentList)
                                     | None -> Some [ sstbl ])
-                        | None -> printfn $"Warning: Failed to open SSTable file: {filePath}. It might be corrupted."
+                        | None -> Logger.Warn $"Failed to open SSTable file: {filePath}. It might be corrupted."
 
                     // Initialize agents (MailboxProcessors)
                     // Create a mutable reference to OcisDB to allow agents to update its state
