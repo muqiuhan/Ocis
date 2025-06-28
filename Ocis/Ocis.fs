@@ -36,9 +36,11 @@ type OcisDB
         gcAgent: MailboxProcessor<GcMessage>,
         flushThreshold: int
     ) =
-    // Constants for compaction strategy
-    static let L0_COMPACTION_THRESHOLD = 5 // Number of Level 0 SSTables to trigger compaction
-    static let LEVEL_SIZE_MULTIPLIER = 10 // Each level is approximately 10 times larger than the previous one
+    /// Number of Level 0 SSTables to trigger compaction
+    static let L0_COMPACTION_THRESHOLD = 5 
+    
+    /// Each level is approximately 10 times larger than the previous one
+    static let LEVEL_SIZE_MULTIPLIER = 10
 
     let mutable ssTables = ssTables
     let mutable currentMemtbl = currentMemtbl
@@ -179,11 +181,11 @@ type OcisDB
 
                 match SSTbl.Open(flushedSSTblPath) with
                 | Some newSSTbl -> Ok(Some newSSTbl)
-                | None -> Error(sprintf "Failed to open recompacted SSTable at %s" flushedSSTblPath)
+                | None -> Error($"Failed to open recompacted SSTable at {flushedSSTblPath}")
             else
                 Ok None // No changes, no new SSTbl needed. Or all entries were deletion markers and didn't get added.
         with ex ->
-            Error(sprintf "Error recompacting SSTable %s: %s" sstbl.Path ex.Message)
+            Error($"Error recompacting SSTable {sstbl.Path}: {ex.Message}")
 
     /// <summary>
     /// Performs compaction for Level 0 SSTables.
@@ -241,7 +243,7 @@ type OcisDB
                         //     "Compaction successful: Removed %d SSTables from Level 0 (all deletion markers)."
                         //     sstblsToMerge.Length
                         }
-                | Error msg -> printfn "Error during Level 0 compaction: %s" msg
+                | Error msg -> printfn $"Error during Level 0 compaction: {msg}"
             | _ -> () // No compaction needed for Level 0
         }
 
@@ -366,7 +368,7 @@ type OcisDB
                         else
                             return () // No compaction needed (size), returns unit
                     | _ -> return () // Level has no SSTables or is empty, returns unit
-                } // End of do! async block
+                }
         }
 
     /// <summary>
@@ -413,7 +415,7 @@ type OcisDB
                     // For a more robust implementation, define a MAX_LEVEL or dynamically handle it.
                     // For demonstration, let's assume we have Levels 0, 1, 2 for now.
                     for level = 1 to 2 do // Example: compact Levels 1 and 2
-                        do! OcisDB.compactLevel (dbRef, level) // Explicitly tuple arguments
+                        do! OcisDB.compactLevel(dbRef, level)
 
                     return ()
 

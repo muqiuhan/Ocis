@@ -62,7 +62,7 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
 
             Ok(new Valog(path, fileStream, head, tail))
         with ex ->
-            Error(sprintf "Failed to open or create Value Log file '%s': %s" path ex.Message)
+            Error($"Failed to open or create Value Log file '{path}': {ex.Message}")
 
     /// <summary>
     /// Append a key-value pair to the Value Log file.
