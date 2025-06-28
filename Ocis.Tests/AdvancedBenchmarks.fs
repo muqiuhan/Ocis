@@ -311,11 +311,7 @@ type AdvancedBenchmarks() =
 
         // Output memory usage statistics
         printfn
-            "Memory usage - Before: %d KB, After Write: %d KB, After Read: %d KB, After GC: %d KB"
-            (beforeMemory / 1024L)
-            (afterWriteMemory / 1024L)
-            (afterReadMemory / 1024L)
-            (afterGCMemory / 1024L)
+            $"Memory usage - Before: {beforeMemory / 1024L} KB, After Write: {afterWriteMemory / 1024L} KB, After Read: {afterReadMemory / 1024L} KB, After GC: {afterGCMemory / 1024L} KB"
 
     [<GlobalCleanup>]
     member this.GlobalCleanup() =

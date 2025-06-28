@@ -127,11 +127,11 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
                 with
                 | :? EndOfStreamException ->
                     // If the file is corrupted or the given position points to an incomplete entry (e.g., due to a crash), this may happen.
-                    printfn "Warning: Reached the end of the stream when reading Value Log offset %d." location
+                    printfn $"Warning: Reached the end of the stream when reading Value Log offset {location}."
                     None
                 | ex ->
                     // Capture other potential I/O errors.
-                    printfn "Error: An error occurred when reading Value Log offset %d: %s" location ex.Message
+                    printfn $"Error: An error occurred when reading Value Log offset {location}: {ex.Message}"
                     None)
 
     /// <summary>
@@ -175,7 +175,7 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
         (valog: Valog, liveLocations: Set<int64>)
         : Async<Result<Valog * Map<int64, int64>, string> option> =
         async {
-            printfn "Valog GC: Started. Received %d live locations." liveLocations.Count
+            printfn $"Valog GC: Started. Received {liveLocations.Count} live locations."
 
             let tempValogPath = valog.Path + ".temp"
             let mutable remappedLocations = Map.empty<int64, int64>
@@ -221,11 +221,11 @@ type Valog(path: string, fileStream: FileStream, head: int64, tail: int64) =
                     printfn "Valog GC: Successfully replaced Valog file."
                     return Some(Ok(newValog, remappedLocations))
                 | Error msg ->
-                    printfn "Valog GC Error: Failed to re-open Valog after GC: %s" msg
+                    printfn $"Valog GC Error: Failed to re-open Valog after GC: {msg}"
                     return Some(Error msg)
 
             with ex ->
-                printfn "Valog GC Error: %s" ex.Message
+                printfn $"Valog GC Error: {ex.Message}"
                 // Clean up temp file in case of error
                 if File.Exists(tempValogPath) then
                     File.Delete(tempValogPath)
