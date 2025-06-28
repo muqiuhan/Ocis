@@ -31,7 +31,7 @@ type Memtbl () =
     /// </summary>
     /// <param name="key">The key to add or update.</param>
     /// <param name="valueLocation">The value location to associate with the key.</param>
-    member this.Add (key : byte array, valueLocation : ValueLocation) : unit = memtbl.[key] <- valueLocation
+    member _.Add (key : byte array, valueLocation : ValueLocation) : unit = memtbl.[key] <- valueLocation
 
     /// <summary>
     /// Get the value location of the given key from Memtbl.

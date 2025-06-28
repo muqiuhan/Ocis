@@ -16,10 +16,14 @@
     <Compile Include="ValueLocation.fs" />
     <Compile Include="utils\ByteArrayComparer.fs" />
     <Compile Include="utils\Serialization.fs" />
+    <Compile Include="utils\Logger.fs" />
     <Compile Include="Memtbl.fs" />
     <Compile Include="SSTbl.fs" />
     <Compile Include="Valog.fs" />
     <Compile Include="WAL.fs" />
     <Compile Include="Ocis.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Logary" Version="5.0.1" />
   </ItemGroup>
 </Project>
