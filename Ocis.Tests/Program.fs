@@ -81,11 +81,12 @@ let main argv =
     let config = AllowNonOptimizedConfig()
 
     if argv.Length = 0 then
-        BenchmarkRunner.Run<OcisDBBenchmarks>(config) |> ignore
+        SimpleTests().Run()
     else
         match argv[0] with
         | "advance" -> BenchmarkRunner.Run<AdvancedBenchmarks>(config) |> ignore
         | "simple" -> SimpleTests().Run()
+        | "base"
         | _ -> BenchmarkRunner.Run<OcisDBBenchmarks>(config) |> ignore
 
     0
