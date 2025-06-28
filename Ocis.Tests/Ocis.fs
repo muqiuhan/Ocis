@@ -5,8 +5,8 @@ open Ocis.OcisDB
 open System.IO
 open System.Text
 open System.Threading
-open System.Diagnostics // For Stopwatch
-open System.Diagnostics // For Process
+open System.Diagnostics
+open System.Diagnostics
 
 [<TestFixture>]
 type OcisDBTests() =
@@ -204,7 +204,7 @@ type OcisDBTests() =
             let initialAllocatedBytes = System.GC.GetAllocatedBytesForCurrentThread()
 
             // Insert data
-            printfn "Inserting %d entries for Memory Footprint test..." count
+            printfn $"Inserting {count} entries for Memory Footprint test..."
 
             for i = 0 to count - 1 do
                 let key = Encoding.UTF8.GetBytes($"mem_key_{i}")
@@ -214,7 +214,7 @@ type OcisDBTests() =
             let finalAllocatedBytes = System.GC.GetAllocatedBytesForCurrentThread()
             let allocated = finalAllocatedBytes - initialAllocatedBytes
 
-            printfn "\nTotal allocated memory for %d entries: %f MB" count (float allocated / (1024.0 * 1024.0))
+            printfn $"\nTotal allocated memory for {count} entries: {float allocated / (1024.0 * 1024.0)} MB"
 
         // The average memory usage per record should not exceed 250 bytes (key + value + overhead)
         // let expectedMaxAllocation = int64 count * 250L

@@ -94,18 +94,14 @@ type Wal(path: string, fileStream: FileStream) =
                             yield WalEntry.Delete(key)
                         | _ ->
                             // Encountered unknown or corrupted entry, skip or log error
-                            printfn
-                                "Warning: Encountered unknown WAL entry type %d in WAL file '%s'."
-                                (int entryType)
-                                path
+                            printfn $"Warning: Encountered unknown WAL entry type {int entryType} in WAL file '{path}'."
                 // Attempt to skip the current entry, but for simplicity, we break here. A more robust skipping logic is needed in production systems.
                 with
                 | :? EndOfStreamException ->
                     // File might be incomplete, or reached end of stream
                     printfn
-                        "Warning: Reached end of stream when replaying WAL file '%s', file might be incomplete."
-                        path
-                | ex -> printfn "Error: An error occurred when replaying WAL file '%s': %s" path ex.Message
+                        $"Warning: Reached end of stream when replaying WAL file '{path}', file might be incomplete."
+                | ex -> printfn $"Error: An error occurred when replaying WAL file '{path}': {ex.Message}"
         }
 
     /// <summary>

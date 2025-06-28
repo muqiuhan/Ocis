@@ -356,13 +356,11 @@ type OcisDB
                                     return () // This returns unit for the do! block
 
                                 | Error msg ->
-                                    printfn "Error during Level %d compaction: %s" level msg
+                                    printfn $"Error during Level {level} compaction: {msg}"
                                     return () // Returns unit
                             | None ->
                                 printfn
-                                    "Level %d: No suitable SSTable found for compaction (max overlap size: %d)."
-                                    level
-                                    maxOverlapSize
+                                    $"Level {level}: No suitable SSTable found for compaction (max overlap size: {maxOverlapSize})."
 
                                 return () // Returns unit
                         else
@@ -404,9 +402,9 @@ type OcisDB
 
                             // After flushing, check if compaction is needed
                             mailbox.Post(TriggerCompaction)
-                        | None -> printfn "Error: Failed to open flushed SSTable at %s" flushedSSTblPath
+                        | None -> printfn $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
                     with ex ->
-                        printfn "Error flushing Memtable to SSTable: %s" ex.Message
+                        printfn $"Error flushing Memtable to SSTable: {ex.Message}"
 
                 | TriggerCompaction ->
                     do! OcisDB.compactLevel0 dbRef // Try to compact Level 0 first
@@ -437,7 +435,7 @@ type OcisDB
                             // printfn "Recompacted SSTable %s to %s (Level %d)" sstbl.Path newSSTbl.Path level
                             | Ok None -> newSSTblList.Add(sstbl) // No change, keep original SSTable
                             | Error msg ->
-                                printfn "Error recompacting SSTable %s: %s" sstbl.Path msg
+                                printfn $"Error recompacting SSTable {sstbl.Path}: {msg}"
                                 newSSTblList.Add(sstbl) // On error, keep original SSTable
 
                         updatedSSTables <- updatedSSTables |> Map.add level (newSSTblList |> List.ofSeq)
@@ -489,8 +487,7 @@ type OcisDB
                         dbRef.Value.ValueLog <- newValog // Update the Valog instance in OcisDB
 
                         printfn
-                            "Valog GC: Values were moved, %d value locations remapped. Affected SSTables might need re-compaction to update pointers."
-                            remappedLocations.Count
+                            $"Valog GC: Values were moved, {remappedLocations.Count} value locations remapped. Affected SSTables might need re-compaction to update pointers."
 
                         // Merge new remappedLocations into pendingRemappedLocations
                         for KeyValue(key, newLoc) in remappedLocations do
@@ -499,7 +496,7 @@ type OcisDB
 
                         // Trigger a compaction cycle to handle the remapping in affected SSTables
                         dbRef.Value.CompactionAgent.Post(TriggerCompaction) // Trigger general compaction
-                    | Some(Error msg) -> printfn "Valog GC Error: %s" msg
+                    | Some(Error msg) -> printfn $"Valog GC Error: {msg}"
                     | None -> printfn "Valog GC: No values were moved or no remapping needed."
 
         }
@@ -545,7 +542,7 @@ type OcisDB
                                     match currentListOption with
                                     | Some currentList -> Some(sstbl :: currentList)
                                     | None -> Some [ sstbl ])
-                        | None -> printfn "Warning: Failed to open SSTable file: %s. It might be corrupted." filePath
+                        | None -> printfn $"Warning: Failed to open SSTable file: {filePath}. It might be corrupted."
 
                     // Initialize agents (MailboxProcessors)
                     // Create a mutable reference to OcisDB to allow agents to update its state
@@ -571,7 +568,7 @@ type OcisDB
 
                     Ok ocisDB))
         with ex ->
-            Error(sprintf "Failed to open WiscKeyDB: %s" ex.Message)
+            Error($"Failed to open WiscKeyDB: {ex.Message}")
 
     /// <summary>
     /// Sets a key-value pair in the database.
@@ -607,7 +604,7 @@ type OcisDB
 
                 return Ok()
             with ex ->
-                return Error(sprintf "Failed to set key-value pair: %s" ex.Message)
+                return Error($"Failed to set key-value pair: {ex.Message}")
         }
 
     /// <summary>
@@ -627,10 +624,7 @@ type OcisDB
                         | Some(_, value) -> Ok(Some value)
                         | None ->
                             Error(
-                                sprintf
-                                    "Failed to read value from Valog at location %d for key %s."
-                                    valueLocation
-                                    (Encoding.UTF8.GetString(key))
+                                $"Failed to read value from Valog at location {valueLocation} for key {Encoding.UTF8.GetString(key)}."
                             )
 
                 // 1. Search CurrentMemTable
@@ -662,8 +656,7 @@ type OcisDB
                             // If not found anywhere
                             return Ok None
             with ex ->
-                return Error(sprintf "Failed to get value for key %s: %s" (Encoding.UTF8.GetString(key)) ex.Message)
-
+                return Error($"Failed to get value for key {Encoding.UTF8.GetString(key)}: {ex.Message}")
         }
 
     /// <summary>
@@ -692,5 +685,5 @@ type OcisDB
 
                 return Ok()
             with ex ->
-                return Error(sprintf "Failed to delete key %s: %s" (Encoding.UTF8.GetString(key)) ex.Message)
+                return Error($"Failed to delete key {Encoding.UTF8.GetString(key)}: {ex.Message}")
         }

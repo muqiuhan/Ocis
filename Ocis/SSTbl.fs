@@ -176,7 +176,7 @@ type SSTbl
 
             None
         | ex ->
-            printfn "Error opening SSTable '%s': %s" path ex.Message
+            printfn $"Error opening SSTable '{path}': {ex.Message}"
 
             if fileStream <> null then
                 fileStream.Dispose() // Ensure the stream is closed when other exceptions occur
