@@ -23,7 +23,6 @@ type ByteArrayComparer() =
         member _.Compare(lhs: byte array, rhs: byte array) =
             System.ReadOnlySpan<byte>(lhs).SequenceCompareTo(System.ReadOnlySpan<byte>(rhs))
 
-
     member inline this.Compare(lhs: byte array, rhs: byte array) =
         (this :> IComparer<byte array>).Compare(lhs, rhs)
 

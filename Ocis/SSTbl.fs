@@ -61,7 +61,7 @@ type SSTbl
 
                     let key = Serialization.readByteArray reader
                     let valueLocation = Serialization.readValueLocation reader
-                    new KeyValuePair<byte array, ValueLocation>(key, valueLocation))
+                    KeyValuePair<byte array, ValueLocation>(key, valueLocation))
 
             // Create an enumerator that reads key-value pairs from the SSTable file
             (seq {
@@ -90,7 +90,7 @@ type SSTbl
 
         use writer = new BinaryWriter(fileStream)
 
-        let mutable recordOffsets = ResizeArray<int64>() // Store
+        let mutable recordOffsets = ResizeArray<int64>()
         let mutable currentLowKey: byte array = null
         let mutable currentHighKey: byte array = null
 
