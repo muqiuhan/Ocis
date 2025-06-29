@@ -7,7 +7,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis", "Ocis\Ocis.fsproj", 
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Tests", "Ocis.Tests\Ocis.Tests.fsproj", "{FA455AF4-A27D-48C0-97FE-D904A166E3BA}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Cli", "Ocis.Cli\Ocis.Cli.fsproj", "{BC1BCEFC-B667-400B-9560-44312874B998}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Server", "Ocis.Server\Ocis.Server.fsproj", "{BC1BCEFC-B667-400B-9560-44312874B998}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

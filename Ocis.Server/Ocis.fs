@@ -1,6 +1,6 @@
-module Ocis.Cli.Ocis
+module Ocis.Server.Ocis
 
-open Ocis.Cli.Config
+open Ocis.Server.Config
 open Ocis.OcisDB
 open Ocis.Utils.Logger
 open Microsoft.Extensions.Logging

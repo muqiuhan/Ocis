@@ -1,4 +1,4 @@
-module Ocis.Cli.Config
+module Ocis.Server.Config
 
 type OcisConfig = {
     Dir : string
