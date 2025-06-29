@@ -1,10 +1,10 @@
-﻿module Ocis.Cli.Program
+﻿module Ocis.Server.Program
 
 open System.IO
 open FSharp.SystemCommandLine
 open Input
-open Ocis.Cli.Config
-open Ocis.Cli.Ocis
+open Ocis.Server.Config
+open Ocis.Server.Ocis
 
 [<EntryPoint>]
 let main argv = rootCommand argv {
