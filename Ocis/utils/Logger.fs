@@ -9,14 +9,26 @@ open Logary.Configuration
 open Logary.Targets
 
 module Logger =
-
-    let LOGGER_INSTANCE =
-        Config.create "Ocis" "laptop"
+    let mutable LOGGER_INSTANCE =
+        Config.create "Ocis" ""
         |> Config.target (LiterateConsole.create LiterateConsole.empty "console")
-        |> Config.ilogger (ILogger.Console Debug)
+        |> Config.ilogger (ILogger.Console Info)
+        |> Config.loggerLevels [ "Ocis", LogLevel.Info ]
         |> Config.build
         |> run
         |> fun logary -> logary.getLogger "Ocis"
+
+
+    let inline SetLogLevel (level : LogLevel) =
+        LOGGER_INSTANCE <-
+            Config.create "Ocis" ""
+            |> Config.target (LiterateConsole.create LiterateConsole.empty "console")
+            |> Config.ilogger (ILogger.Console Info)
+            |> Config.loggerLevels [ "Ocis", level ]
+            |> Config.build
+            |> run
+            |> fun logary -> logary.getLogger "Ocis"
+
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
     let inline Info (message : string) = LOGGER_INSTANCE.info (eventX message)
