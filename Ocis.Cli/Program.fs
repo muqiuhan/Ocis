@@ -3,6 +3,8 @@
 open System.IO
 open FSharp.SystemCommandLine
 open Input
+open Ocis.Cli.Config
+open Ocis.Cli.Ocis
 
 [<EntryPoint>]
 let main argv = rootCommand argv {
@@ -62,9 +64,12 @@ let main argv = rootCommand argv {
                 | false -> Ok ())
     )
     setAction (fun (workingDir, flushThreshold, l0CompactionThreshold, levelSizeMultiplier, logLevel) ->
-        printfn $"Working directory: {workingDir}"
-        printfn $"Flush threshold: {flushThreshold}"
-        printfn $"L0 compaction threshold: {l0CompactionThreshold}"
-        printfn $"Level size multiplier: {levelSizeMultiplier}"
-        printfn $"Log level: {logLevel}")
+        {
+            Dir = workingDir.FullName
+            FlushThreshold = flushThreshold |> Option.defaultValue 1000
+            L0CompactionThreshold = l0CompactionThreshold |> Option.defaultValue 4
+            LevelSizeMultiplier = levelSizeMultiplier |> Option.defaultValue 5
+            LogLevel = logLevel |> Option.defaultValue "Info"
+        }
+        |> Ocis.Run)
 }
