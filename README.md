@@ -10,15 +10,6 @@ Ocis is a key-value storage engine implemented based on the [WiscKey](https://ww
 *   **LSM-Tree Structure**: The project implements Memtable (in-memory mutable structure), SSTable (on-disk immutable file), and Write-Ahead Log (WAL). Through a background Compaction process, SSTables are optimized and garbage collected.
 *   **Durability and Recovery**: **WAL (Write-Ahead Log)** ensures the durability of Memtable updates, supports crash recovery, and guarantees data consistency.
 
-## F#
-
-Ocis leverages the features of the F# language to build a robust and efficient storage engine:
-
-*   **Functional and Immutability**: Core data structures like SSTable utilize F#'s immutability, simplifying concurrency and state management.
-*   **Type Safety**: Extensive use of F#'s `Result` and `Option` types for error handling and representing potentially missing values enhances code robustness and readability.
-*   **Concurrency Model**: Utilizes F#'s `MailboxProcessor` (Agent) to implement independent background tasks, such as Memtable flushing to SSTable, and future planned Compaction and Value Log garbage collection, effectively managing concurrent operations without blocking the main thread.
-*   **High-Performance I/O**: Efficient byte array operations and file I/O are achieved by directly manipulating `FileStream` and `BinaryWriter/Reader`, combined with optimizations like `System.Memory.Span<T>`.
-
 ## Performance Benchmarks
 
 

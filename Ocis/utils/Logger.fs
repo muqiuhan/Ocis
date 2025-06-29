@@ -2,48 +2,49 @@ module Ocis.Utils.Logger
 
 
 open System.Runtime.CompilerServices
-open Hopac
-open Logary
-open Logary.Message
-open Logary.Configuration
-open Logary.Targets
+open Microsoft.Extensions.Logging
+open Microsoft.Extensions.Logging.Console
 
 module Logger =
-    let mutable LOGGER_INSTANCE =
-        Config.create "Ocis" ""
-        |> Config.target (LiterateConsole.create LiterateConsole.empty "console")
-        |> Config.ilogger (ILogger.Console Info)
-        |> Config.loggerLevels [ "Ocis", LogLevel.Info ]
-        |> Config.build
-        |> run
-        |> fun logary -> logary.getLogger "Ocis"
+    let mutable LOGGER_FACTORY =
+        LoggerFactory.Create (fun builder ->
+            builder
+                .AddSimpleConsole(fun options ->
+                    options.IncludeScopes <- true
+                    options.SingleLine <- true
+                    options.TimestampFormat <- "HH:mm:ss ")
+                .SetMinimumLevel (LogLevel.Information)
+            |> ignore)
 
+    let mutable LOGGER = LOGGER_FACTORY.CreateLogger ("Ocis")
 
     let inline SetLogLevel (level : LogLevel) =
-        LOGGER_INSTANCE <-
-            Config.create "Ocis" ""
-            |> Config.target (LiterateConsole.create LiterateConsole.empty "console")
-            |> Config.ilogger (ILogger.Console Info)
-            |> Config.loggerLevels [ "Ocis", level ]
-            |> Config.build
-            |> run
-            |> fun logary -> logary.getLogger "Ocis"
+        LOGGER_FACTORY <-
+            LoggerFactory.Create (fun builder ->
+                builder
+                    .AddSimpleConsole(fun options ->
+                        options.IncludeScopes <- true
+                        options.SingleLine <- true
+                        options.TimestampFormat <- "HH:mm:ss ")
+                    .SetMinimumLevel (level)
+                |> ignore)
+        LOGGER <- LOGGER_FACTORY.CreateLogger ("Ocis")
 
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Info (message : string) = LOGGER_INSTANCE.info (eventX message)
+    let inline Info (message : string) = LOGGER.LogInformation (message)
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Error (message : string) = LOGGER_INSTANCE.error (eventX message)
+    let inline Error (message : string) = LOGGER.LogError (message)
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Warn (message : string) = LOGGER_INSTANCE.warn (eventX message)
+    let inline Warn (message : string) = LOGGER.LogWarning (message)
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Debug (message : string) = LOGGER_INSTANCE.debug (eventX message)
+    let inline Debug (message : string) = LOGGER.LogDebug (message)
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Fatal (message : string) = LOGGER_INSTANCE.fatal (eventX message)
+    let inline Fatal (message : string) = LOGGER.LogCritical (message)
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Verbose (message : string) = LOGGER_INSTANCE.verbose (eventX message)
+    let inline Verbose (message : string) = LOGGER.LogTrace (message)

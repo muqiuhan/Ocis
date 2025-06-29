@@ -2,15 +2,6 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PublishAot>true</PublishAot>
-    <PublishSingleFile>false</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-    <IsAotCompatible>true</IsAotCompatible>
-    <ServerGarbageCollection>false</ServerGarbageCollection>
-    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
-    <Optimize>true</Optimize>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="ValueLocation.fs" />
@@ -24,6 +15,7 @@
     <Compile Include="Ocis.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Logary" Version="5.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.6" />
   </ItemGroup>
 </Project>
