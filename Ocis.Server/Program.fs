@@ -8,7 +8,7 @@ open Ocis.Server.Ocis
 
 [<EntryPoint>]
 let main argv = rootCommand argv {
-    description "A cross-platform, robust asynchronous WiscKey storage engine."
+    description "A cross-platform, robust asynchronous WiscKey storage engine with TCP server."
     inputs (
         argument "working-dir"
         |> desc "The working directory"
@@ -20,7 +20,7 @@ let main argv = rootCommand argv {
                 Error $"Directory does not exist"),
 
         optionMaybe "--flush-threshold"
-        |> desc "Trigger Memtable flush threshold"
+        |> desc "Trigger Memtable flush threshold (default: 1000)"
         |> validate (fun threshold ->
             match threshold with
             | Some threshold when threshold > 0 -> Ok ()
@@ -28,8 +28,7 @@ let main argv = rootCommand argv {
             | _ -> Ok ()),
 
         optionMaybe "--l0-compaction-threshold"
-        |> desc
-            "The option threshold of Level 0 (L0) SSTables. When the number of SSTable files generated in the L0 level reaches or exceeds this value, the system triggers a merge operation from L0 to Level 1 (L1). For write-intensive applications, this value can be appropriately increased to reduce the merge frequency. For read-intensive applications, this value can be appropriately reduced to reduce the scan range of L0 and speed up the reading speed."
+        |> desc "L0 SSTables compaction threshold (default: 4)"
         |> validate (fun threshold ->
             match threshold with
             | Some threshold when threshold > 0 -> Ok ()
@@ -37,8 +36,7 @@ let main argv = rootCommand argv {
             | _ -> Ok ()),
 
         optionMaybe "--level-size-multiplier"
-        |> desc
-            "This option determines the size ratio between adjacent levels in the LSM tree. A larger number (such as 10) usually means fewer levels, larger levels, less frequent merges but more data per merge. This may be beneficial to write throughput in some cases, but may cause long merge pauses. A smaller number (such as 2 or 4) usually means more levels, smaller levels, more frequent merges but less data per merge. This may be more beneficial to read performance because there are relatively fewer files per level."
+        |> desc "LSM tree level size multiplier (default: 5)"
         |> validate (fun multiplier ->
             match multiplier with
             | Some multiplier when multiplier > 0 -> Ok ()
@@ -46,7 +44,7 @@ let main argv = rootCommand argv {
             | _ -> Ok ()),
 
         optionMaybe "--log-level"
-        |> desc "Set the log level. Available levels: Debug, Info, Warn, Error, Fatal."
+        |> desc "Log level: Debug, Info, Warn, Error, Fatal (default: Info)"
         |> validate (fun level ->
             Option.bind
                 (fun level ->
@@ -61,15 +59,46 @@ let main argv = rootCommand argv {
             |> Option.isSome
             |> function
                 | true -> Ok ()
-                | false -> Ok ())
+                | false -> Ok ()),
+
+        optionMaybe "--host"
+        |> desc "Server host address (default: 0.0.0.0)"
+        |> validate (fun host ->
+            match host with
+            | Some _ -> Ok ()
+            | None -> Ok ()),
+
+        optionMaybe "--port"
+        |> desc "Server port (default: 7379)"
+        |> validate (fun port ->
+            match port with
+            | Some port when port > 0 && port <= 65535 -> Ok ()
+            | Some _ -> Error $"Port must be between 1 and 65535"
+            | None -> Ok ()),
+
+        optionMaybe "--max-connections"
+        |> desc "Maximum concurrent connections (default: 1000)"
+        |> validate (fun maxConn ->
+            match maxConn with
+            | Some maxConn when maxConn > 0 -> Ok ()
+            | Some _ -> Error $"Max connections must be greater than 0"
+            | None -> Ok ())
     )
-    setAction (fun (workingDir, flushThreshold, l0CompactionThreshold, levelSizeMultiplier, logLevel) ->
+    setAction (fun (workingDir, flushThreshold, l0CompactionThreshold, levelSizeMultiplier, logLevel, host, port, maxConnections) ->
         {
+            // Database configuration
             Dir = workingDir.FullName
             FlushThreshold = flushThreshold |> Option.defaultValue 1000
             L0CompactionThreshold = l0CompactionThreshold |> Option.defaultValue 4
             LevelSizeMultiplier = levelSizeMultiplier |> Option.defaultValue 5
             LogLevel = logLevel |> Option.defaultValue "Info"
+
+            // Network configuration (using default values)
+            Host = host |> Option.defaultValue "0.0.0.0"
+            Port = port |> Option.defaultValue 7379
+            MaxConnections = maxConnections |> Option.defaultValue 1000
+            ReceiveTimeout = 30000 // Default 30 seconds
+            SendTimeout = 30000 // Default 30 seconds
         }
         |> Ocis.Run)
 }

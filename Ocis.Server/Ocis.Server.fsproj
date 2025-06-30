@@ -14,6 +14,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Config.fs" />
+    <Compile Include="Protocol.fs" />
+    <Compile Include="Handler.fs" />
+    <Compile Include="Connection.fs" />
+    <Compile Include="Server.fs" />
     <Compile Include="Ocis.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
@@ -23,5 +27,6 @@
   <ItemGroup>
     <PackageReference Include="FSharp.Data" Version="6.6.0" />
     <PackageReference Include="FSharp.SystemCommandLine" Version="2.0.0-beta5.5" />
+    <PackageReference Include="System.IO.Pipelines" Version="9.0.6" />
   </ItemGroup>
 </Project>
