@@ -3,6 +3,7 @@ module Ocis.Server.Handler
 open System
 open System.Threading.Tasks
 open Ocis.Server.Protocol
+open Ocis.Server.ProtocolSpec
 open Ocis.OcisDB
 open Ocis.Utils.Logger
 

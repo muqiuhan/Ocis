@@ -13,3 +13,4 @@ IMPL.md
 Ocis.Tests/TestResults/
 Ocis.sln.DotSettings.user
 BenchmarkDotNet.Artifacts/*.log
+.fake
