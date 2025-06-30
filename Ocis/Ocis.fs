@@ -620,13 +620,12 @@ type OcisDB
             | None ->
                 // 2. Search ImmutableMemTables (from newest to oldest)
                 let immutableLocationOption =
-                    let memtbls = this.ImmutableMemtbl.ToArray () // Create a snapshot
-                    let mutable found = None
-                    let mutable i = memtbls.Length - 1
+                    let memtbls = this.ImmutableMemtbl.GetEnumerator ()
 
-                    while i >= 0 && found.IsNone do
-                        found <- memtbls.[i].TryGet (key)
-                        i <- i - 1
+                    let mutable found = None
+
+                    while memtbls.MoveNext () && found.IsNone do
+                        found <- memtbls.Current.TryGet (key)
 
                     found
 
