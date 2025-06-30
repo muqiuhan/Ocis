@@ -9,6 +9,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Tests", "Ocis.Tests\Oc
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Server", "Ocis.Server\Ocis.Server.fsproj", "{BC1BCEFC-B667-400B-9560-44312874B998}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Server.Tests", "Ocis.Server.Tests\Ocis.Server.Tests.fsproj", "{233CCE83-ACD1-4E17-A34C-44D56B1566FD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{BC1BCEFC-B667-400B-9560-44312874B998}.Release|x64.Build.0 = Release|Any CPU
 		{BC1BCEFC-B667-400B-9560-44312874B998}.Release|x86.ActiveCfg = Release|Any CPU
 		{BC1BCEFC-B667-400B-9560-44312874B998}.Release|x86.Build.0 = Release|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Debug|x64.Build.0 = Debug|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Debug|x86.Build.0 = Debug|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Release|x64.ActiveCfg = Release|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Release|x64.Build.0 = Release|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Release|x86.ActiveCfg = Release|Any CPU
+		{233CCE83-ACD1-4E17-A34C-44D56B1566FD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
