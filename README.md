@@ -16,7 +16,9 @@ The project includes both an embedded storage engine library (`Ocis`) and a high
   - Binary network protocol implementation
   - Connection management and async I/O
   - Server configuration and lifecycle management
-- **`Ocis.Tests/`** - Performance benchmarks and core engine tests  
+  - **`Ocis.Protocol/`** - Ocis.Server SDK with multi-language support
+    - Use Fable to provide client support for Ocis.Server in JS/TS/Rust/Python/Dart
+- **`Ocis.Tests/`** - Performance benchmarks and core engine tests
 - **`Ocis.Server.Tests/`** - Server integration and protocol tests
 
 ## Design

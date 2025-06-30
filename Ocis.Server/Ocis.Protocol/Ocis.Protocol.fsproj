@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <FableJsOutputDir>./ocis-protocol-js</FableJsOutputDir>
+    <FableTsOutputDir>./ocis-protocol-ts</FableTsOutputDir>
+    <FablePyOutputDir>./ocis-protocol-py</FablePyOutputDir>
+    <FableDartOutputDir>./ocis-protocol-dart</FableDartOutputDir>
+    <FableRsOutputDir>./ocis-protocol-rs</FableRsOutputDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../ProtocolSpec.fs" />
+    <Compile Include="Library.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Fable.Core" Version="4.5.0" />
+  </ItemGroup>
+
+  <Target Name="SDK" DependsOnTargets="Build">
+    <Message Text="Compiling F# to JavaScript with Fable..." Importance="high" />
+    <Exec Command="dotnet fable --lang javascript -o &quot;$(FableJsOutputDir)&quot;" />
+
+    <Message Text="Compiling F# to TypeScript with Fable..." Importance="high" />
+    <Exec Command="dotnet fable --lang typescript -o &quot;$(FableTsOutputDir)&quot;" />
+
+    <Message Text="Compiling F# to Python with Fable..." Importance="high" />
+    <Exec Command="dotnet fable --lang python -o &quot;$(FablePyOutputDir)&quot;" />
+
+    <Message Text="Compiling F# to Dart with Fable..." Importance="high" />
+    <Exec Command="dotnet fable --lang dart -o &quot;$(FableDartOutputDir)&quot;" />
+
+    <Message Text="Compiling F# to Rust with Fable..." Importance="high" />
+    <Exec Command="dotnet fable --lang rust -o &quot;$(FableRsOutputDir)&quot;" />
+  </Target>
+
+</Project>

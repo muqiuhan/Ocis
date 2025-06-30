@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Net.Sockets
 open System.Threading
+open Ocis.Server.ProtocolSpec
 open Ocis.Server.Protocol
 open Ocis.Server.Handler
 open Ocis.OcisDB
@@ -57,10 +58,10 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
     member private this.ReadMessageAsync (stream : NetworkStream) = async {
         try
             // Read header
-            let headerBuffer = Array.zeroCreate<byte> Protocol.HEADER_SIZE
-            let! headerBytesRead = this.ReadExactAsync (stream, headerBuffer, Protocol.HEADER_SIZE)
+            let headerBuffer = Array.zeroCreate<byte> ProtocolSpec.HEADER_SIZE
+            let! headerBytesRead = this.ReadExactAsync (stream, headerBuffer, ProtocolSpec.HEADER_SIZE)
 
-            if headerBytesRead < Protocol.HEADER_SIZE then
+            if headerBytesRead < ProtocolSpec.HEADER_SIZE then
                 return None
             else
                 match Protocol.TryParseRequestHeader headerBuffer with
@@ -68,11 +69,11 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
                     if Protocol.IsValidPacketSize header.TotalPacketLength then
                         // Read complete packet
                         let packetBuffer = Array.zeroCreate<byte> header.TotalPacketLength
-                        Array.Copy (headerBuffer, packetBuffer, Protocol.HEADER_SIZE)
+                        Array.Copy (headerBuffer, packetBuffer, ProtocolSpec.HEADER_SIZE)
 
-                        let remainingBytes = header.TotalPacketLength - Protocol.HEADER_SIZE
+                        let remainingBytes = header.TotalPacketLength - ProtocolSpec.HEADER_SIZE
                         if remainingBytes > 0 then
-                            let! remainingBytesRead = this.ReadExactAsync (stream, packetBuffer, remainingBytes, Protocol.HEADER_SIZE)
+                            let! remainingBytesRead = this.ReadExactAsync (stream, packetBuffer, remainingBytes, ProtocolSpec.HEADER_SIZE)
                             if remainingBytesRead < remainingBytes then
                                 return None
                             else
