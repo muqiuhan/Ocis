@@ -1,58 +1,14 @@
 from __future__ import annotations
-from ..protocol_spec import RequestPacket
-from .fable_modules.fable_library.array_ import (get_sub_array, concat)
-from .fable_modules.fable_library.bit_converter import (to_uint32, to_int32, get_bytes_uint32, get_bytes_int32)
-from .fable_modules.fable_library.reflection import enum_type
-from .fable_modules.fable_library.types import (uint32, uint8, Array, Uint8Array)
+from typing import (Any, Generic, TypeVar)
+from ..protocol_spec import (RequestPacket, ResponsePacket)
+from .fable_modules.fable_library.array_ import (concat, get_sub_array)
+from .fable_modules.fable_library.bit_converter import (get_bytes_uint32, get_bytes_int32, to_uint32, to_int32)
+from .fable_modules.fable_library.encoding import get_utf8
+from .fable_modules.fable_library.reflection import (enum_type, TypeInfo, string_type, union_type)
+from .fable_modules.fable_library.string_ import (to_text, printf)
+from .fable_modules.fable_library.types import (uint32, uint8, Array, Uint8Array, Union)
 
-def TryParseRequestHeader(buffer: bytearray) -> RequestPacket | None:
-    if len(buffer) < 18:
-        return None
-
-    else: 
-        try: 
-            offset: int = 0
-            magic_number: uint32 = to_uint32(buffer, offset)
-            offset = (offset + 4) or 0
-            version: uint8 = buffer[offset]
-            offset = (offset + 1) or 0
-            command_type: enum_type("Ocis.Server.ProtocolSpec.CommandType", int, [("Set", 1.0), ("Get", 2.0), ("Delete", 3.0)]) = int(buffer[offset]) or 0
-            offset = (offset + 1) or 0
-            total_packet_length: int = to_int32(buffer, offset)
-            offset = (offset + 4) or 0
-            key_length: int = to_int32(buffer, offset)
-            offset = (offset + 4) or 0
-            return RequestPacket(magic_number, version, command_type, total_packet_length, key_length, to_int32(buffer, offset), bytearray([]), None) if ((version == uint8(1)) if (magic_number == uint32(1397310287)) else False) else None
-
-        except Exception as match_value:
-            return None
-
-
-
-
-def TryParseRequestPacket(buffer: bytearray) -> RequestPacket | None:
-    match_value: RequestPacket | None = TryParseRequestHeader(buffer)
-    if match_value is None:
-        return None
-
-    else: 
-        header: RequestPacket = match_value
-        if len(buffer) >= header.TotalPacketLength:
-            try: 
-                offset: int = 18
-                key: bytearray = get_sub_array(buffer, offset, header.KeyLength)
-                offset = (offset + header.KeyLength) or 0
-                return RequestPacket(header.MagicNumber, header.Version, header.CommandType, header.TotalPacketLength, header.KeyLength, header.ValueLength, key, get_sub_array(buffer, offset, header.ValueLength) if (header.ValueLength > 0) else None)
-
-            except Exception as match_value_1:
-                return None
-
-
-        else: 
-            return None
-
-
-
+_T = TypeVar("_T")
 
 def CreateRequest(command_type: enum_type("Ocis.Server.ProtocolSpec.CommandType", int, [("Set", 1.0), ("Get", 2.0), ("Delete", 3.0)]), key: bytearray, value: bytearray | None=None) -> RequestPacket:
     value_len: int = (0 if (value is None) else len(value)) or 0
@@ -79,5 +35,93 @@ def SerializeRequest(packet: RequestPacket) -> bytearray:
     return concat(parts[:], Uint8Array)
 
 
-__all__ = ["TryParseRequestHeader", "TryParseRequestPacket", "CreateRequest", "SerializeRequest"]
+def _expr2(gen0: TypeInfo) -> TypeInfo:
+    return union_type("Ocis.Protocol.ParseResult`1", [gen0], ParseResult_1, lambda: [[("Item", gen0)], [("Item", string_type)], []])
+
+
+class ParseResult_1(Union, Generic[_T]):
+    def __init__(self, tag: int, *fields: Any) -> None:
+        super().__init__()
+        self.tag: int = tag or 0
+        self.fields: Array[Any] = list(fields)
+
+    @staticmethod
+    def cases() -> list[str]:
+        return ["ParseSuccess", "ParseError", "InsufficientData"]
+
+
+ParseResult_1_reflection = _expr2
+
+def DeserializeResponse(buffer: bytearray) -> ParseResult_1[ResponsePacket]:
+    try: 
+        if len(buffer) < 18:
+            return ParseResult_1(2)
+
+        else: 
+            offset: int = 0
+            magic_number: uint32 = to_uint32(buffer, offset)
+            offset = (offset + 4) or 0
+            version: uint8 = buffer[offset]
+            offset = (offset + 1) or 0
+            status_code: enum_type("Ocis.Server.ProtocolSpec.StatusCode", uint8, [("Success", 0.0), ("NotFound", 1.0), ("Error", 2.0)]) = buffer[offset]
+            offset = (offset + 1) or 0
+            total_packet_length: int = to_int32(buffer, offset)
+            offset = (offset + 4) or 0
+            value_length: int = to_int32(buffer, offset)
+            offset = (offset + 4) or 0
+            error_message_length: int = to_int32(buffer, offset)
+            offset = (offset + 4) or 0
+            if len(buffer) < total_packet_length:
+                return ParseResult_1(2)
+
+            elif not ((version == uint8(1)) if (magic_number == uint32(1397310287)) else False):
+                return ParseResult_1(1, "invalid header")
+
+            elif True if (value_length < 0) else (error_message_length < 0):
+                return ParseResult_1(1, "invalid length field")
+
+            elif total_packet_length != ((18 + value_length) + error_message_length):
+                return ParseResult_1(1, "packet length mismatch")
+
+            else: 
+                value: bytearray | None = get_sub_array(buffer, offset, value_length) if (value_length > 0) else None
+                offset = (offset + value_length) or 0
+                def _arrow4(__unit: None=None) -> str | None:
+                    error_bytes: bytearray = get_sub_array(buffer, offset, error_message_length)
+                    return get_utf8().get_string(error_bytes)
+
+                return ParseResult_1(0, ResponsePacket(magic_number, version, status_code, total_packet_length, value_length, error_message_length, value, _arrow4() if (error_message_length > 0) else None))
+
+
+
+    except Exception as ex:
+        def _arrow3(__unit: None=None) -> str:
+            arg: str = str(ex)
+            return to_text(printf("error parsing response: %s"))(arg)
+
+        return ParseResult_1(1, _arrow3())
+
+
+
+def ProtocolHelper_stringToBytes(s: str) -> bytearray:
+    return get_utf8().get_bytes(s)
+
+
+def ProtocolHelper_bytesToString(bytes: bytearray) -> str:
+    return get_utf8().get_string(bytes)
+
+
+def ProtocolHelper_createSetRequest(key: str, value: str) -> RequestPacket:
+    return CreateRequest(1, ProtocolHelper_stringToBytes(key), ProtocolHelper_stringToBytes(value))
+
+
+def ProtocolHelper_createGetRequest(key: str) -> RequestPacket:
+    return CreateRequest(2, ProtocolHelper_stringToBytes(key), None)
+
+
+def ProtocolHelper_createDeleteRequest(key: str) -> RequestPacket:
+    return CreateRequest(3, ProtocolHelper_stringToBytes(key), None)
+
+
+__all__ = ["CreateRequest", "SerializeRequest", "ParseResult_1_reflection", "DeserializeResponse", "ProtocolHelper_stringToBytes", "ProtocolHelper_bytesToString", "ProtocolHelper_createSetRequest", "ProtocolHelper_createGetRequest", "ProtocolHelper_createDeleteRequest"]
 

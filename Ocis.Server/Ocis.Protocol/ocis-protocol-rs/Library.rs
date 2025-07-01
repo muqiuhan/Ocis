@@ -20,6 +20,7 @@ mod module_57be7934 {
             use fable_library_rust::BitConverter_::getBytesUInt32;
             use fable_library_rust::BitConverter_::toInt32;
             use fable_library_rust::BitConverter_::toUInt32;
+            use fable_library_rust::Encoding_::get_UTF8;
             use fable_library_rust::Exception_::try_catch;
             use fable_library_rust::Native_::LrcPtr;
             use fable_library_rust::Native_::MutCell;
@@ -31,137 +32,13 @@ mod module_57be7934 {
             use fable_library_rust::NativeArray_::toArray;
             use fable_library_rust::Seq_::ofArray;
             use fable_library_rust::Seq_::toArray as toArray_1;
+            use fable_library_rust::String_::sprintf;
+            use fable_library_rust::String_::string;
             use crate::Ocis::Server::ProtocolSpec::RequestPacket;
+            use crate::Ocis::Server::ProtocolSpec::ResponsePacket;
             use fable_library_rust::System::Collections::Generic::IEnumerable_1;
             use fable_library_rust::System::Exception;
-            /// Parse request packet header from byte array
-            pub fn TryParseRequestHeader(buffer: Array<u8>)
-             -> Option<LrcPtr<RequestPacket>> {
-                if (get_Count(buffer.clone())) < 18_i32 {
-                    None::<LrcPtr<RequestPacket>>
-                } else {
-                    try_catch(||
-                                  {
-                                      let offset: MutCell<i32> =
-                                          MutCell::new(0_i32);
-                                      let magicNumber: u32 =
-                                          toUInt32(buffer.clone(),
-                                                   offset.get().clone());
-                                      offset.set((offset.get().clone()) +
-                                                     4_i32);
-                                      {
-                                          let version: u8 =
-                                              buffer[offset.get().clone()].clone();
-                                          offset.set((offset.get().clone()) +
-                                                         1_i32);
-                                          {
-                                              let commandType: i32 =
-                                                  buffer[offset.get().clone()].clone()
-                                                      as i32 as i32;
-                                              offset.set((offset.get().clone())
-                                                             + 1_i32);
-                                              {
-                                                  let totalPacketLength: i32 =
-                                                      toInt32(buffer.clone(),
-                                                              offset.get().clone());
-                                                  offset.set((offset.get().clone())
-                                                                 + 4_i32);
-                                                  {
-                                                      let keyLength: i32 =
-                                                          toInt32(buffer.clone(),
-                                                                  offset.get().clone());
-                                                      offset.set((offset.get().clone())
-                                                                     + 4_i32);
-                                                      if if (magicNumber) ==
-                                                                1397310287_u32
-                                                            {
-                                                             (version) == 1_u8
-                                                         } else { false } {
-                                                          Some(LrcPtr::new(RequestPacket{MagicNumber:
-                                                                                             magicNumber,
-                                                                                         Version:
-                                                                                             version,
-                                                                                         CommandType:
-                                                                                             commandType,
-                                                                                         TotalPacketLength:
-                                                                                             totalPacketLength,
-                                                                                         KeyLength:
-                                                                                             keyLength,
-                                                                                         ValueLength:
-                                                                                             toInt32(buffer,
-                                                                                                     offset.get().clone()),
-                                                                                         Key:
-                                                                                             new_empty::<u8>(),
-                                                                                         Value:
-                                                                                             None::<Array<u8>>,}))
-                                                      } else {
-                                                          None::<LrcPtr<RequestPacket>>
-                                                      }
-                                                  }
-                                              }
-                                          }
-                                      }
-                                  },
-                              |matchValue: LrcPtr<Exception>|
-                                  None::<LrcPtr<RequestPacket>>)
-                }
-            }
-            /// Parse complete request packet from byte array
-            pub fn TryParseRequestPacket(buffer: Array<u8>)
-             -> Option<LrcPtr<RequestPacket>> {
-                let matchValue: Option<LrcPtr<RequestPacket>> =
-                    Ocis::Protocol::TryParseRequestHeader(buffer.clone());
-                match &matchValue {
-                    None => None::<LrcPtr<RequestPacket>>,
-                    Some(matchValue_0_0) => {
-                        let header: LrcPtr<RequestPacket> =
-                            matchValue_0_0.clone();
-                        if (get_Count(buffer.clone())) >=
-                               (header.TotalPacketLength) {
-                            try_catch(||
-                                          {
-                                              let offset: MutCell<i32> =
-                                                  MutCell::new(18_i32);
-                                              let key: Array<u8> =
-                                                  getSubArray(buffer.clone(),
-                                                              offset.get().clone(),
-                                                              header.KeyLength);
-                                              offset.set((offset.get().clone())
-                                                             +
-                                                             (header.KeyLength));
-                                              Some(LrcPtr::new(RequestPacket{MagicNumber:
-                                                                                 header.MagicNumber,
-                                                                             Version:
-                                                                                 header.Version,
-                                                                             CommandType:
-                                                                                 header.CommandType,
-                                                                             TotalPacketLength:
-                                                                                 header.TotalPacketLength,
-                                                                             KeyLength:
-                                                                                 header.KeyLength,
-                                                                             ValueLength:
-                                                                                 header.ValueLength,
-                                                                             Key:
-                                                                                 key,
-                                                                             Value:
-                                                                                 if (header.ValueLength)
-                                                                                        >
-                                                                                        0_i32
-                                                                                    {
-                                                                                     Some(getSubArray(buffer.clone(),
-                                                                                                      offset.get().clone(),
-                                                                                                      header.ValueLength))
-                                                                                 } else {
-                                                                                     None::<Array<u8>>
-                                                                                 },}))
-                                          },
-                                      |matchValue_1: LrcPtr<Exception>|
-                                          None::<LrcPtr<RequestPacket>>)
-                        } else { None::<LrcPtr<RequestPacket>> }
-                    }
-                }
-            }
-            /// Create request packet
+            /// create request packet
             pub fn CreateRequest(commandType: i32, key: Array<u8>,
                                  value: Option<Array<u8>>)
              -> LrcPtr<RequestPacket> {
@@ -182,7 +59,7 @@ mod module_57be7934 {
                                           Key: key,
                                           Value: value.clone(),})
             }
-            /// Serialize request packet to byte array
+            /// serialize request packet to bytes
             pub fn SerializeRequest(packet: LrcPtr<RequestPacket>)
              -> Array<u8> {
                 let parts: Array<Array<u8>> = new_empty::<Array<u8>>();
@@ -202,6 +79,202 @@ mod module_57be7934 {
                     }
                 }
                 concat(toArray_1(ofArray(toArray(parts.clone()))))
+            }
+            /// protocol parse result
+            #[derive(Clone, Hash, PartialEq, PartialOrd,)]
+            pub enum ParseResult_1<T: Clone + 'static> {
+                ParseSuccess(T),
+                ParseError(string),
+                InsufficientData,
+            }
+            impl <T: Clone + 'static> core::fmt::Debug for ParseResult_1<T> {
+                fn fmt(&self, f: &mut core::fmt::Formatter)
+                 -> core::fmt::Result {
+                    write!(f, "{}", core::any::type_name::<Self>())
+                }
+            }
+            impl <T: Clone + 'static> core::fmt::Display for ParseResult_1<T>
+             {
+                fn fmt(&self, f: &mut core::fmt::Formatter)
+                 -> core::fmt::Result {
+                    write!(f, "{}", core::any::type_name::<Self>())
+                }
+            }
+            /// deserialize response from bytes
+            pub fn DeserializeResponse(buffer: Array<u8>)
+             ->
+                 LrcPtr<Ocis::Protocol::ParseResult_1<LrcPtr<ResponsePacket>>> {
+                try_catch(||
+                              if (get_Count(buffer.clone())) < 18_i32 {
+                                  LrcPtr::new(Ocis::Protocol::ParseResult_1::InsufficientData::<LrcPtr<ResponsePacket>>)
+                              } else {
+                                  let offset: MutCell<i32> =
+                                      MutCell::new(0_i32);
+                                  let magicNumber: u32 =
+                                      toUInt32(buffer.clone(),
+                                               offset.get().clone());
+                                  offset.set((offset.get().clone()) + 4_i32);
+                                  {
+                                      let version: u8 =
+                                          buffer[offset.get().clone()].clone();
+                                      offset.set((offset.get().clone()) +
+                                                     1_i32);
+                                      {
+                                          let statusCode: u8 =
+                                              buffer[offset.get().clone()].clone()
+                                                  as u8;
+                                          offset.set((offset.get().clone()) +
+                                                         1_i32);
+                                          {
+                                              let totalPacketLength: i32 =
+                                                  toInt32(buffer.clone(),
+                                                          offset.get().clone());
+                                              offset.set((offset.get().clone())
+                                                             + 4_i32);
+                                              {
+                                                  let valueLength: i32 =
+                                                      toInt32(buffer.clone(),
+                                                              offset.get().clone());
+                                                  offset.set((offset.get().clone())
+                                                                 + 4_i32);
+                                                  {
+                                                      let errorMessageLength:
+                                                              i32 =
+                                                          toInt32(buffer.clone(),
+                                                                  offset.get().clone());
+                                                      offset.set((offset.get().clone())
+                                                                     + 4_i32);
+                                                      if (get_Count(buffer.clone()))
+                                                             <
+                                                             (totalPacketLength)
+                                                         {
+                                                          LrcPtr::new(Ocis::Protocol::ParseResult_1::InsufficientData::<LrcPtr<ResponsePacket>>)
+                                                      } else {
+                                                          if !if (magicNumber)
+                                                                     ==
+                                                                     1397310287_u32
+                                                                 {
+                                                                  (version) ==
+                                                                      1_u8
+                                                              } else { false }
+                                                             {
+                                                              LrcPtr::new(Ocis::Protocol::ParseResult_1::ParseError::<LrcPtr<ResponsePacket>>(string("invalid header")))
+                                                          } else {
+                                                              if if (valueLength)
+                                                                        <
+                                                                        0_i32
+                                                                    {
+                                                                     true
+                                                                 } else {
+                                                                     (errorMessageLength)
+                                                                         <
+                                                                         0_i32
+                                                                 } {
+                                                                  LrcPtr::new(Ocis::Protocol::ParseResult_1::ParseError::<LrcPtr<ResponsePacket>>(string("invalid length field")))
+                                                              } else {
+                                                                  if (totalPacketLength)
+                                                                         !=
+                                                                         ((18_i32
+                                                                               +
+                                                                               (valueLength))
+                                                                              +
+                                                                              (errorMessageLength))
+                                                                     {
+                                                                      LrcPtr::new(Ocis::Protocol::ParseResult_1::ParseError::<LrcPtr<ResponsePacket>>(string("packet length mismatch")))
+                                                                  } else {
+                                                                      let value:
+                                                                              Option<Array<u8>> =
+                                                                          if (valueLength)
+                                                                                 >
+                                                                                 0_i32
+                                                                             {
+                                                                              Some(getSubArray(buffer.clone(),
+                                                                                               offset.get().clone(),
+                                                                                               valueLength))
+                                                                          } else {
+                                                                              None::<Array<u8>>
+                                                                          };
+                                                                      offset.set((offset.get().clone())
+                                                                                     +
+                                                                                     (valueLength));
+                                                                      LrcPtr::new(Ocis::Protocol::ParseResult_1::ParseSuccess::<LrcPtr<ResponsePacket>>(LrcPtr::new(ResponsePacket{MagicNumber:
+                                                                                                                                                                                       magicNumber,
+                                                                                                                                                                                   Version:
+                                                                                                                                                                                       version,
+                                                                                                                                                                                   StatusCode:
+                                                                                                                                                                                       statusCode,
+                                                                                                                                                                                   TotalPacketLength:
+                                                                                                                                                                                       totalPacketLength,
+                                                                                                                                                                                   ValueLength:
+                                                                                                                                                                                       valueLength,
+                                                                                                                                                                                   ErrorMessageLength:
+                                                                                                                                                                                       errorMessageLength,
+                                                                                                                                                                                   Value:
+                                                                                                                                                                                       value,
+                                                                                                                                                                                   ErrorMessage:
+                                                                                                                                                                                       if (errorMessageLength)
+                                                                                                                                                                                              >
+                                                                                                                                                                                              0_i32
+                                                                                                                                                                                          {
+                                                                                                                                                                                           let errorBytes:
+                                                                                                                                                                                                   Array<u8> =
+                                                                                                                                                                                               getSubArray(buffer,
+                                                                                                                                                                                                           offset.get().clone(),
+                                                                                                                                                                                                           errorMessageLength);
+                                                                                                                                                                                           Some(get_UTF8().getString(errorBytes))
+                                                                                                                                                                                       } else {
+                                                                                                                                                                                           None::<string>
+                                                                                                                                                                                       },})))
+                                                                  }
+                                                              }
+                                                          }
+                                                      }
+                                                  }
+                                              }
+                                          }
+                                      }
+                                  }
+                              },
+                          |ex: LrcPtr<Exception>|
+                              LrcPtr::new(Ocis::Protocol::ParseResult_1::ParseError::<LrcPtr<ResponsePacket>>({
+                                                                                                                  let arg:
+                                                                                                                          string =
+                                                                                                                      ex.get_Message();
+                                                                                                                  sprintf!("error parsing response: {}",
+                                                                                                                           arg)
+                                                                                                              })))
+            }
+            pub mod ProtocolHelper {
+                use super::*;
+                /// convert string to bytes
+                pub fn stringToBytes(s: string) -> Array<u8> {
+                    get_UTF8().getBytes(s)
+                }
+                /// convert bytes to string
+                pub fn bytesToString(bytes: Array<u8>) -> string {
+                    get_UTF8().getString(bytes)
+                }
+                /// create SET request
+                pub fn createSetRequest(key: string, value: string)
+                 -> LrcPtr<RequestPacket> {
+                    Ocis::Protocol::CreateRequest(1_i32,
+                                                  Ocis::Protocol::ProtocolHelper::stringToBytes(key),
+                                                  Some(Ocis::Protocol::ProtocolHelper::stringToBytes(value)))
+                }
+                /// create GET request
+                pub fn createGetRequest(key: string)
+                 -> LrcPtr<RequestPacket> {
+                    Ocis::Protocol::CreateRequest(2_i32,
+                                                  Ocis::Protocol::ProtocolHelper::stringToBytes(key),
+                                                  None::<Array<u8>>)
+                }
+                /// create DELETE request
+                pub fn createDeleteRequest(key: string)
+                 -> LrcPtr<RequestPacket> {
+                    Ocis::Protocol::CreateRequest(3_i32,
+                                                  Ocis::Protocol::ProtocolHelper::stringToBytes(key),
+                                                  None::<Array<u8>>)
+                }
             }
         }
     }

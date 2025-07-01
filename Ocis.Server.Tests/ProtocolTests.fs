@@ -4,6 +4,7 @@ open System
 open System.IO
 open NUnit.Framework
 open Ocis.Server.Protocol
+open Ocis.Server.ProtocolSpec
 
 [<TestFixture>]
 type ProtocolTests () =
