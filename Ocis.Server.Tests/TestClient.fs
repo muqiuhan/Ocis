@@ -5,6 +5,7 @@ open System.IO
 open System.Net.Sockets
 open System.Threading.Tasks
 open Ocis.Server.Protocol
+open Ocis.Server.ProtocolSpec
 
 /// Client operation result
 type ClientResult<'T> =
