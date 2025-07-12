@@ -145,11 +145,11 @@ type OcisDB
 
                 match SSTbl.Open flushedSSTblPath with
                 | Some newSSTbl -> Ok (Some newSSTbl, liveEntriesInNewSSTbl |> List.ofSeq) // Return new SSTbl and live entries
-                | None -> Error (sprintf "Failed to open newly merged SSTable at %s" flushedSSTblPath)
+                | None -> Error $"Failed to open newly merged SSTable at {flushedSSTblPath}"
             else
                 Ok (None, []) // No entries to merge, return None and empty list
         with ex ->
-            Error (sprintf "Error merging SSTables: %s" ex.Message)
+            Error $"Error merging SSTables: {ex.Message}"
 
     static member private compact
         (dbRef : OcisDB ref, level : int, sstblsToMerge : SSTbl list, targetLevel : int, remappedLocations : Map<int64, int64> option)
@@ -260,7 +260,7 @@ type OcisDB
                     int64 L0_COMPACTION_THRESHOLD
                     * (pown (int64 LEVEL_SIZE_MULTIPLIER) (level - 1))
 
-                let currentLevelTotalSize = currentLevelSSTables |> List.sumBy (fun sstbl -> sstbl.Size)
+                let currentLevelTotalSize = currentLevelSSTables |> List.sumBy _.Size
 
                 if currentLevelTotalSize >= targetLevelSize then
                     let mutable bestSSTblToCompact : SSTbl option = None
@@ -271,8 +271,8 @@ type OcisDB
                             match nextLevelSSTablesOption with
                             | Some nextLevelSSTables ->
                                 nextLevelSSTables
-                                |> List.filter (fun nsstbl -> sstbl.Overlaps nsstbl)
-                                |> List.sumBy (fun os -> os.Size)
+                                |> List.filter sstbl.Overlaps
+                                |> List.sumBy _.Size
                                 |> int64
                             | None -> 0L
 
@@ -286,7 +286,7 @@ type OcisDB
                             match nextLevelSSTablesOption with
                             | Some nextLevelSSTables ->
                                 nextLevelSSTables
-                                |> List.filter (fun sstbl -> sstblToCompact.Overlaps sstbl)
+                                |> List.filter sstblToCompact.Overlaps
                             | None -> []
 
                         let sstblsToMerge = sstblToCompact :: overlappingSSTables
@@ -635,10 +635,10 @@ type OcisDB
                     let sstblLocationOption =
                         this.SSTables
                         |> Map.toSeq
-                        |> Seq.sortBy (fun (lvl, _) -> lvl)
+                        |> Seq.sortBy fst
                         |> Seq.tryPick (fun (_, sstblList) ->
                             sstblList
-                            |> List.sortByDescending (fun s -> s.Timestamp)
+                            |> List.sortByDescending _.Timestamp
                             |> List.tryPick (fun sstbl -> sstbl.TryGet key))
 
                     match sstblLocationOption with

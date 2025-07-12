@@ -41,7 +41,7 @@ type Wal (path : string, fileStream : FileStream) =
             fileStream.Seek (0L, SeekOrigin.End) |> ignore
             Ok (new Wal (path, fileStream))
         with ex ->
-            Error (sprintf "Failed to open or create WAL file '%s': %s" path ex.Message)
+            Error $"Failed to open or create WAL file '{path}': {ex.Message}"
 
     /// <summary>
     /// Appends a WalEntry to the WAL file.
