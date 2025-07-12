@@ -23,18 +23,18 @@ type OcisDBBenchmarks () =
     member this.GlobalSetup () =
         dbPath <- Path.Combine (tempDir, "ocisdb_benchmark_instance")
 
-        if Directory.Exists (tempDir) then
+        if Directory.Exists tempDir then
             Directory.Delete (tempDir, true)
 
-        Directory.CreateDirectory (tempDir) |> ignore
+        Directory.CreateDirectory tempDir |> ignore
 
         // 为 Set 测试准备数据
-        keys <- Array.init this.Count (fun i -> Encoding.UTF8.GetBytes ($"perf_key_{i}"))
+        keys <- Array.init this.Count (fun i -> Encoding.UTF8.GetBytes $"perf_key_{i}")
         values <- Array.init this.Count (fun i -> Encoding.UTF8.GetBytes ($"perf_value_{i}_" + new string ('A', 100)))
 
     [<IterationSetup>]
     member this.IterationSetup () =
-        if Directory.Exists (dbPath) then
+        if Directory.Exists dbPath then
             Directory.Delete (dbPath, true)
 
         match OcisDB.Open (dbPath, this.Count) with
@@ -45,7 +45,7 @@ type OcisDBBenchmarks () =
     member this.BulkSet () =
         async {
             for i = 0 to this.Count - 1 do
-                let! _ = db.Set (keys.[i], values.[i])
+                let! _ = db.Set (keys[i], values[i])
                 ()
         }
         |> Async.RunSynchronously
@@ -59,7 +59,7 @@ type OcisDBBenchmarks () =
 
         async {
             for key in keys do
-                let! _ = db.Get (key)
+                let! _ = db.Get key
                 ()
         }
         |> Async.RunSynchronously
@@ -68,5 +68,5 @@ type OcisDBBenchmarks () =
     member this.GlobalCleanup () =
         (db :> System.IDisposable).Dispose ()
 
-        if Directory.Exists (tempDir) then
+        if Directory.Exists tempDir then
             Directory.Delete (tempDir, true)

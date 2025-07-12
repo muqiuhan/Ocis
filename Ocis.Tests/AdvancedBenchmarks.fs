@@ -5,7 +5,6 @@ open Ocis.OcisDB
 open System.IO
 open System.Text
 open System
-open System.Threading.Tasks
 
 /// <summary>
 /// Advanced benchmarks simulating complex data distribution and access patterns in real-world scenarios.
@@ -40,32 +39,32 @@ type AdvancedBenchmarks () =
     member this.GlobalSetup () =
         dbPath <- Path.Combine (tempDir, "advanced_benchmark_db")
 
-        if Directory.Exists (tempDir) then
+        if Directory.Exists tempDir then
             Directory.Delete (tempDir, true)
 
-        Directory.CreateDirectory (tempDir) |> ignore
+        Directory.CreateDirectory tempDir |> ignore
 
         // Generate different types of test data
         let hotDataCount = int (float this.DataSize * this.HotDataRatio)
         let coldDataCount = this.DataSize - hotDataCount
 
         // Hot data: short keys, small values, concentrated distribution
-        hotKeys <- Array.init hotDataCount (fun i -> Encoding.UTF8.GetBytes ($"hot_{i:D6}"))
+        hotKeys <- Array.init hotDataCount (fun i -> Encoding.UTF8.GetBytes $"hot_{i:D6}")
         hotValues <- Array.init hotDataCount (fun i -> Encoding.UTF8.GetBytes ($"hot_value_{i}" + String ('H', 50)))
 
         // Cold data: long keys, large values, scattered distribution
-        coldKeys <- Array.init coldDataCount (fun i -> Encoding.UTF8.GetBytes ($"cold_data_key_{i:D8}_{Guid.NewGuid().ToString ()}"))
+        coldKeys <- Array.init coldDataCount (fun i -> Encoding.UTF8.GetBytes $"cold_data_key_{i:D8}_{Guid.NewGuid().ToString ()}")
 
         coldValues <- Array.init coldDataCount (fun i -> Encoding.UTF8.GetBytes ($"cold_value_{i}_" + String ('C', 200)))
 
         // Randomly distributed keys (to simulate real access patterns)
-        let random = Random (42) // Fixed seed for reproducibility
+        let random = Random 42 // Fixed seed for reproducibility
 
         randomKeys <-
             Array.init (this.DataSize / 4) (fun i ->
                 let keyLength = random.Next (8, 32)
                 let keyBytes = Array.zeroCreate<byte> keyLength
-                random.NextBytes (keyBytes)
+                random.NextBytes keyBytes
                 keyBytes)
 
         randomValues <-
@@ -74,13 +73,13 @@ type AdvancedBenchmarks () =
                 Encoding.UTF8.GetBytes (String ('R', valueSize)))
 
         // Sequential keys (for range query tests)
-        sequentialKeys <- Array.init (this.DataSize / 4) (fun i -> Encoding.UTF8.GetBytes ($"seq_{i:D10}"))
+        sequentialKeys <- Array.init (this.DataSize / 4) (fun i -> Encoding.UTF8.GetBytes $"seq_{i:D10}")
 
         sequentialValues <- Array.init (this.DataSize / 4) (fun i -> Encoding.UTF8.GetBytes ($"sequential_value_{i}_" + String ('S', 150)))
 
     [<IterationSetup>]
     member this.IterationSetup () =
-        if Directory.Exists (dbPath) then
+        if Directory.Exists dbPath then
             Directory.Delete (dbPath, true)
 
         // Use a smaller flush threshold to force the creation of multiple SSTables
@@ -98,35 +97,35 @@ type AdvancedBenchmarks () =
         async {
             // Layer 1: Write hot data
             for i = 0 to hotKeys.Length - 1 do
-                let! _ = db.Set (hotKeys.[i], hotValues.[i])
+                let! _ = db.Set (hotKeys[i], hotValues[i])
                 ()
 
             // Force flush to L0
             db.WAL.Flush ()
             db.ValueLog.Flush ()
-            System.Threading.Thread.Sleep (100) // Wait for compaction
+            System.Threading.Thread.Sleep 100 // Wait for compaction
 
             // Layer 2: Write cold data
             for i = 0 to coldKeys.Length - 1 do
-                let! _ = db.Set (coldKeys.[i], coldValues.[i])
+                let! _ = db.Set (coldKeys[i], coldValues[i])
                 ()
 
             db.WAL.Flush ()
             db.ValueLog.Flush ()
-            System.Threading.Thread.Sleep (100)
+            System.Threading.Thread.Sleep 100
 
             // Layer 3: Write random data
             for i = 0 to randomKeys.Length - 1 do
-                let! _ = db.Set (randomKeys.[i], randomValues.[i])
+                let! _ = db.Set (randomKeys[i], randomValues[i])
                 ()
 
             db.WAL.Flush ()
             db.ValueLog.Flush ()
-            System.Threading.Thread.Sleep (100)
+            System.Threading.Thread.Sleep 100
 
             // Layer 4: Write sequential data
             for i = 0 to sequentialKeys.Length - 1 do
-                let! _ = db.Set (sequentialKeys.[i], sequentialValues.[i])
+                let! _ = db.Set (sequentialKeys[i], sequentialValues[i])
                 ()
 
             db.WAL.Flush ()
@@ -148,21 +147,21 @@ type AdvancedBenchmarks () =
                 // 80% of reads access hot data
                 for i = 0 to min (hotKeys.Length - 1) (int (float hotKeys.Length * 0.8)) do
                     yield async {
-                        let! _ = db.Get (hotKeys.[i])
+                        let! _ = db.Get (hotKeys[i])
                         ()
                     }
 
                 // 15% of reads access cold data
                 for i = 0 to min (coldKeys.Length - 1) (int (float coldKeys.Length * 0.15)) do
                     yield async {
-                        let! _ = db.Get (coldKeys.[i])
+                        let! _ = db.Get (coldKeys[i])
                         ()
                     }
 
                 // 5% of reads access random data
                 for i = 0 to min (randomKeys.Length - 1) (int (float randomKeys.Length * 0.05)) do
                     yield async {
-                        let! _ = db.Get (randomKeys.[i])
+                        let! _ = db.Get (randomKeys[i])
                         ()
                     }
             ]
@@ -183,16 +182,16 @@ type AdvancedBenchmarks () =
         async {
             // Execute multiple range queries, each potentially spanning multiple SSTables
             let queryRanges = [
-                (Encoding.UTF8.GetBytes ("hot_000000"), Encoding.UTF8.GetBytes ("hot_000100"))
-                (Encoding.UTF8.GetBytes ("cold_data_key_00000000"), Encoding.UTF8.GetBytes ("cold_data_key_00000050"))
-                (Encoding.UTF8.GetBytes ("seq_0000000000"), Encoding.UTF8.GetBytes ("seq_0000000100"))
+                (Encoding.UTF8.GetBytes "hot_000000", Encoding.UTF8.GetBytes "hot_000100")
+                (Encoding.UTF8.GetBytes "cold_data_key_00000000", Encoding.UTF8.GetBytes "cold_data_key_00000050")
+                (Encoding.UTF8.GetBytes "seq_0000000000", Encoding.UTF8.GetBytes "seq_0000000100")
             ]
 
-            for (startKey, endKey) in queryRanges do
+            for startKey, endKey in queryRanges do
                 // Range query functionality needs to be implemented here
                 // Temporarily using single-point query for simulation
-                let midKey = Encoding.UTF8.GetBytes ("seq_0000000050")
-                let! _ = db.Get (midKey)
+                let midKey = Encoding.UTF8.GetBytes "seq_0000000050"
+                let! _ = db.Get midKey
                 ()
         }
         |> Async.RunSynchronously
@@ -205,7 +204,7 @@ type AdvancedBenchmarks () =
         this.LayeredWrite ()
 
         async {
-            let random = Random (123)
+            let random = Random 123
             let operations = Array.zeroCreate<Async<unit>> 1000
 
             for i = 0 to operations.Length - 1 do
@@ -217,23 +216,23 @@ type AdvancedBenchmarks () =
                         else
                             random.Next (0, coldKeys.Length)
 
-                    operations.[i] <- async {
+                    operations[i] <- async {
                         let key =
                             if keyIndex < hotKeys.Length then
-                                hotKeys.[keyIndex]
+                                hotKeys[keyIndex]
                             else
-                                coldKeys.[keyIndex - hotKeys.Length]
+                                coldKeys[keyIndex - hotKeys.Length]
 
-                        let! _ = db.Get (key)
+                        let! _ = db.Get key
                         ()
                     }
                 else
                     // 30% write operations
-                    let newKey = Encoding.UTF8.GetBytes ($"workload_key_{i}_{random.Next ()}")
+                    let newKey = Encoding.UTF8.GetBytes $"workload_key_{i}_{random.Next ()}"
 
                     let newValue = Encoding.UTF8.GetBytes ($"workload_value_{i}_" + String ('W', random.Next (50, 200)))
 
-                    operations.[i] <- async {
+                    operations[i] <- async {
                         let! _ = db.Set (newKey, newValue)
                         ()
                     }
@@ -253,12 +252,12 @@ type AdvancedBenchmarks () =
 
         // Wait for multiple compactions to complete
         for i = 1 to 5 do
-            System.Threading.Thread.Sleep (200)
+            System.Threading.Thread.Sleep 200
             // Write some new data to trigger more compactions
             async {
                 for j = 1 to 100 do
-                    let key = Encoding.UTF8.GetBytes ($"compaction_trigger_{i}_{j}")
-                    let value = Encoding.UTF8.GetBytes ($"trigger_value_{i}_{j}")
+                    let key = Encoding.UTF8.GetBytes $"compaction_trigger_{i}_{j}"
+                    let value = Encoding.UTF8.GetBytes $"trigger_value_{i}_{j}"
                     let! _ = db.Set (key, value)
                     ()
             }
@@ -267,7 +266,7 @@ type AdvancedBenchmarks () =
         // Test read performance after compaction
         async {
             for i = 0 to min 1000 (hotKeys.Length - 1) do
-                let! _ = db.Get (hotKeys.[i])
+                let! _ = db.Get (hotKeys[i])
                 ()
         }
         |> Async.RunSynchronously
@@ -277,28 +276,28 @@ type AdvancedBenchmarks () =
     /// </summary>
     [<Benchmark>]
     member this.MemoryEfficiencyTest () =
-        let beforeMemory = GC.GetTotalMemory (true)
+        let beforeMemory = GC.GetTotalMemory true
 
         this.LayeredWrite ()
 
-        let afterWriteMemory = GC.GetTotalMemory (true)
+        let afterWriteMemory = GC.GetTotalMemory true
 
         // Perform a large number of read operations
         async {
             for i = 0 to min 5000 (hotKeys.Length - 1) do
-                let! _ = db.Get (hotKeys.[i % hotKeys.Length])
+                let! _ = db.Get (hotKeys[i % hotKeys.Length])
                 ()
         }
         |> Async.RunSynchronously
 
-        let afterReadMemory = GC.GetTotalMemory (true)
+        let afterReadMemory = GC.GetTotalMemory true
 
         // Force garbage collection
         GC.Collect ()
         GC.WaitForPendingFinalizers ()
         GC.Collect ()
 
-        let afterGCMemory = GC.GetTotalMemory (true)
+        let afterGCMemory = GC.GetTotalMemory true
 
         // Output memory usage statistics
         printfn
@@ -307,7 +306,7 @@ type AdvancedBenchmarks () =
     [<GlobalCleanup>]
     member this.GlobalCleanup () =
         if db <> null then
-            (db :> System.IDisposable).Dispose ()
+            (db :> IDisposable).Dispose ()
 
-        if Directory.Exists (tempDir) then
+        if Directory.Exists tempDir then
             Directory.Delete (tempDir, true)

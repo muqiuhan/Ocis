@@ -21,11 +21,11 @@ type ByteArrayComparer () =
         /// If both are equal, return 0.
         /// </returns>
         member _.Compare (lhs : byte array, rhs : byte array) =
-            System.ReadOnlySpan<byte>(lhs).SequenceCompareTo (System.ReadOnlySpan<byte> (rhs))
+            System.ReadOnlySpan<byte>(lhs).SequenceCompareTo (System.ReadOnlySpan<byte> rhs)
 
     /// <summary>
     /// Compare two byte spans.
     /// </summary>
-    member inline this.Compare (lhs : ReadOnlySpan<byte>, rhs : ReadOnlySpan<byte>) = lhs.SequenceCompareTo (rhs)
+    member inline this.Compare (lhs : ReadOnlySpan<byte>, rhs : ReadOnlySpan<byte>) = lhs.SequenceCompareTo rhs
 
-    static member ComparerInstance = new ByteArrayComparer ()
+    static member ComparerInstance = ByteArrayComparer()

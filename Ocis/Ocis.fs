@@ -8,7 +8,6 @@ open Ocis.WAL
 open System.IO
 open System
 open System.Text
-open Ocis.Utils.ByteArrayComparer
 open Ocis.ValueLocation
 open FSharp.Collections
 open Ocis.Utils.Logger
@@ -83,7 +82,7 @@ type OcisDB
     member _.GCAgent = gcAgent
 
     // Implement IDisposable for OcisDB to ensure all underlying resources are properly closed
-    interface System.IDisposable with
+    interface IDisposable with
         member this.Dispose () =
             // Stop agents first
             compactionAgent.Dispose ()
@@ -120,13 +119,13 @@ type OcisDB
 
             let mutable liveEntriesInNewSSTbl = ResizeArray<byte array * ValueLocation> () // To collect live entries for GC
 
-            for (key, valueLoc, _) in allEntries do
-                if not (processedKeys.Contains (key)) then // Only process if key hasn't been processed yet
+            for key, valueLoc, _ in allEntries do
+                if not (processedKeys.Contains key) then // Only process if key hasn't been processed yet
                     // Apply remapping if available
                     let finalValueLoc =
                         match remappedLocations with
                         | Some remap ->
-                            match remap.TryGetValue (valueLoc) with
+                            match remap.TryGetValue valueLoc with
                             | true, newLoc -> newLoc
                             | false, _ -> valueLoc
                         | None -> valueLoc
@@ -135,7 +134,7 @@ type OcisDB
                         mergedMemtbl.Add (key, finalValueLoc)
                         liveEntriesInNewSSTbl.Add ((key, finalValueLoc)) // Collect live entries for GC
 
-                    processedKeys <- processedKeys.Add (key) // Mark key as processed
+                    processedKeys <- processedKeys.Add key // Mark key as processed
 
             if mergedMemtbl.Count > 0 then
                 let newSSTblPath = Path.Combine (dbRef.Value.Dir, $"sstbl-{Guid.NewGuid().ToString ()}.sst")
@@ -144,7 +143,7 @@ type OcisDB
 
                 let flushedSSTblPath = SSTbl.Flush (mergedMemtbl, newSSTblPath, timestamp, targetLevel)
 
-                match SSTbl.Open (flushedSSTblPath) with
+                match SSTbl.Open flushedSSTblPath with
                 | Some newSSTbl -> Ok (Some newSSTbl, liveEntriesInNewSSTbl |> List.ofSeq) // Return new SSTbl and live entries
                 | None -> Error (sprintf "Failed to open newly merged SSTable at %s" flushedSSTblPath)
             else
@@ -168,7 +167,7 @@ type OcisDB
 
             for KeyValue (key, originalValueLoc) in sstbl do
                 let newValueLoc =
-                    match remappedLocations.TryGetValue (originalValueLoc) with
+                    match remappedLocations.TryGetValue originalValueLoc with
                     | true, newLoc ->
                         changed <- true
                         newLoc
@@ -184,13 +183,13 @@ type OcisDB
 
                 let flushedSSTblPath = SSTbl.Flush (recompactedMemtbl, newSSTblPath, timestamp, level)
 
-                match SSTbl.Open (flushedSSTblPath) with
+                match SSTbl.Open flushedSSTblPath with
                 | Some newSSTbl -> Ok (Some newSSTbl)
-                | None -> Error ($"Failed to open recompacted SSTable at {flushedSSTblPath}")
+                | None -> Error $"Failed to open recompacted SSTable at {flushedSSTblPath}"
             else
                 Ok None // No changes, no new SSTbl needed. Or all entries were deletion markers and didn't get added.
         with ex ->
-            Error ($"Error recompacting SSTable {sstbl.Path}: {ex.Message}")
+            Error $"Error recompacting SSTable {sstbl.Path}: {ex.Message}"
 
     /// <summary>Config
     /// Performs compaction for Level 0 SSTables.
@@ -222,7 +221,7 @@ type OcisDB
                     sstblsToMerge
                     |> List.iter (fun sstbl ->
                         (sstbl :> IDisposable).Dispose ()
-                        File.Delete (sstbl.Path))
+                        File.Delete sstbl.Path)
 
                     Logger.Debug $"Compaction successful: Merged {sstblsToMerge.Length} SSTables from Level 0 to Level 1."
                 }
@@ -235,7 +234,7 @@ type OcisDB
                     sstblsToMerge
                     |> List.iter (fun sstbl ->
                         (sstbl :> IDisposable).Dispose ()
-                        File.Delete (sstbl.Path))
+                        File.Delete sstbl.Path)
 
                     Logger.Debug $"Compaction successful: Removed {sstblsToMerge.Length} SSTables from Level 0 (all deletion markers)."
                 }
@@ -272,7 +271,7 @@ type OcisDB
                             match nextLevelSSTablesOption with
                             | Some nextLevelSSTables ->
                                 nextLevelSSTables
-                                |> List.filter (fun nsstbl -> sstbl.Overlaps (nsstbl))
+                                |> List.filter (fun nsstbl -> sstbl.Overlaps nsstbl)
                                 |> List.sumBy (fun os -> os.Size)
                                 |> int64
                             | None -> 0L
@@ -287,7 +286,7 @@ type OcisDB
                             match nextLevelSSTablesOption with
                             | Some nextLevelSSTables ->
                                 nextLevelSSTables
-                                |> List.filter (fun sstbl -> sstblToCompact.Overlaps (sstbl))
+                                |> List.filter (fun sstbl -> sstblToCompact.Overlaps sstbl)
                             | None -> []
 
                         let sstblsToMerge = sstblToCompact :: overlappingSSTables
@@ -343,7 +342,7 @@ type OcisDB
                             sstblsToMerge
                             |> List.iter (fun sstbl ->
                                 (sstbl :> IDisposable).Dispose ()
-                                File.Delete (sstbl.Path))
+                                File.Delete sstbl.Path)
 
                             dbRef.Value.PendingRemappedLocations <- Map.empty<int64, int64> // Clear pending remapped locations
 
@@ -381,7 +380,7 @@ type OcisDB
                 try
                     let flushedSSTblPath = SSTbl.Flush (memtblToFlush, newSSTblPath, timestamp, level)
 
-                    match SSTbl.Open (flushedSSTblPath) with
+                    match SSTbl.Open flushedSSTblPath with
                     | Some sstbl ->
                         // Update the SSTables map in the OcisDB instance
                         dbRef.Value.SSTables <-
@@ -392,7 +391,7 @@ type OcisDB
                                 | None -> Some [ sstbl ])
 
                         // After flushing, check if compaction is needed
-                        mailbox.Post (TriggerCompaction)
+                        mailbox.Post TriggerCompaction
                     | None -> Logger.Error $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
                 with ex ->
                     Logger.Error $"Error flushing Memtable to SSTable: {ex.Message}"
@@ -419,15 +418,15 @@ type OcisDB
                     for sstbl in sstblList do
                         match OcisDB.recompactSSTable (dbRef, sstbl, remappedLocations) with
                         | Ok (Some newSSTbl) ->
-                            newSSTblList.Add (newSSTbl)
+                            newSSTblList.Add newSSTbl
                             (sstbl :> IDisposable).Dispose ()
-                            File.Delete (sstbl.Path)
+                            File.Delete sstbl.Path
                             recompactedCount <- recompactedCount + 1
                             Logger.Debug $"Recompacted SSTable {sstbl.Path} to {newSSTbl.Path} (Level {level})"
-                        | Ok None -> newSSTblList.Add (sstbl) // No change, keep original SSTable
+                        | Ok None -> newSSTblList.Add sstbl // No change, keep original SSTable
                         | Error msg ->
                             Logger.Error $"Error recompacting SSTable {sstbl.Path}: {msg}"
-                            newSSTblList.Add (sstbl) // On error, keep original SSTable
+                            newSSTblList.Add sstbl // On error, keep original SSTable
 
                     updatedSSTables <-
                         updatedSSTables
@@ -454,12 +453,12 @@ type OcisDB
 
                 // From CurrentMemtbl
                 dbRef.Value.CurrentMemtbl
-                |> Seq.iter (fun (KeyValue (_, valueLoc)) -> liveLocations <- liveLocations.Add (valueLoc))
+                |> Seq.iter (fun (KeyValue (_, valueLoc)) -> liveLocations <- liveLocations.Add valueLoc)
 
                 // From ImmutableMemtbl
                 dbRef.Value.ImmutableMemtbl
                 |> Seq.collect (fun memtbl -> memtbl |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc))
-                |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add (valueLoc))
+                |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add valueLoc)
 
                 // From SSTables
                 dbRef.Value.SSTables
@@ -467,7 +466,7 @@ type OcisDB
                 |> Seq.collect (fun (_, sstblList) ->
                     sstblList
                     |> Seq.collect (fun sstbl -> sstbl |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc)))
-                |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add (valueLoc))
+                |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add valueLoc)
 
                 Logger.Debug $"Collected {liveLocations.Count} live value locations."
 
@@ -486,7 +485,7 @@ type OcisDB
                         dbRef.Value.PendingRemappedLocations <- dbRef.Value.PendingRemappedLocations.Add (key, newLoc)
 
                     // Trigger a compaction cycle to handle the remapping in affected SSTables
-                    dbRef.Value.CompactionAgent.Post (TriggerCompaction) // Trigger general compaction
+                    dbRef.Value.CompactionAgent.Post TriggerCompaction // Trigger general compaction
                 | Some (Error msg) -> Logger.Error $"Valog GC Error: {msg}"
                 | None -> Logger.Debug "Valog GC: No values were moved or no remapping needed."
 
@@ -500,32 +499,32 @@ type OcisDB
     static member Open (dir : string, flushThreshold : int) : Result<OcisDB, string> =
         try
             // Ensure the directory exists
-            if not (Directory.Exists (dir)) then
-                Directory.CreateDirectory (dir) |> ignore
+            if not (Directory.Exists dir) then
+                Directory.CreateDirectory dir |> ignore
 
             let valogPath = Path.Combine (dir, "valog.vlog")
 
-            Valog.Create (valogPath)
+            Valog.Create valogPath
             |> Result.bind (fun valog -> // Chain Result operations
                 let walPath = Path.Combine (dir, "wal.log")
 
-                WAL.Wal.Create (walPath)
+                Wal.Create walPath
                 |> Result.bind (fun wal ->
                     // Replay WAL to reconstruct CurrentMemTable
                     let initialMemtbl = Memtbl () // Use Memtbl() for a new instance
-                    let replayedEntries = WAL.Wal.Replay (walPath) // Use WAL.Wal to specify the type
+                    let replayedEntries = Wal.Replay walPath // Use WAL.Wal to specify the type
 
                     for entry in replayedEntries do
                         match entry with
                         | WalEntry.Set (key, valueLoc) -> initialMemtbl.Add (key, valueLoc)
-                        | WalEntry.Delete (key) -> initialMemtbl.Delete (key)
+                        | WalEntry.Delete key -> initialMemtbl.Delete key
 
                     // Load existing SSTables
                     let mutable loadedSSTables = Map.empty<int, SSTbl list> // 修正 Map.empty
                     let sstblFiles = Directory.GetFiles (dir, "sstbl-*.sst") // Assuming SSTables follow this naming convention
 
                     for filePath in sstblFiles do
-                        match SSTbl.Open (filePath) with
+                        match SSTbl.Open filePath with
                         | Some sstbl ->
                             loadedSSTables <-
                                 loadedSSTables
@@ -560,7 +559,7 @@ type OcisDB
 
                     Ok ocisDB))
         with ex ->
-            Error ($"Failed to open WiscKeyDB: {ex.Message}")
+            Error $"Failed to open WiscKeyDB: {ex.Message}"
 
     /// <summary>
     /// Sets a key-value pair in the database.
@@ -589,13 +588,13 @@ type OcisDB
 
             if memtblCount >= flushThreshold then
                 let frozenMemtbl = currentMemtbl
-                immutableMemtbl.Enqueue (frozenMemtbl)
+                immutableMemtbl.Enqueue frozenMemtbl
                 currentMemtbl <- Memtbl () // Create a new empty MemTable
                 compactionAgent.Post (FlushMemtable frozenMemtbl) // Notify compaction agent to flush
 
             return Ok ()
         with ex ->
-            return Error ($"Failed to set key-value pair: {ex.Message}")
+            return Error $"Failed to set key-value pair: {ex.Message}"
     }
 
     /// <summary>
@@ -610,12 +609,12 @@ type OcisDB
                 if valueLocation = -1L then
                     Ok None // Deletion marker
                 else
-                    match this.ValueLog.Read (valueLocation) with
+                    match this.ValueLog.Read valueLocation with
                     | Some (_, value) -> Ok (Some value)
-                    | None -> Error ($"Failed to read value from Valog at location {valueLocation} for key {Encoding.UTF8.GetString (key)}.")
+                    | None -> Error $"Failed to read value from Valog at location {valueLocation} for key {Encoding.UTF8.GetString key}."
 
             // 1. Search CurrentMemTable
-            match this.CurrentMemtbl.TryGet (key) with
+            match this.CurrentMemtbl.TryGet key with
             | Some valueLocation -> return! async { return (resolveValue valueLocation) }
             | None ->
                 // 2. Search ImmutableMemTables (from newest to oldest)
@@ -625,7 +624,7 @@ type OcisDB
                     let mutable found = None
 
                     while memtbls.MoveNext () && found.IsNone do
-                        found <- memtbls.Current.TryGet (key)
+                        found <- memtbls.Current.TryGet key
 
                     found
 
@@ -640,7 +639,7 @@ type OcisDB
                         |> Seq.tryPick (fun (_, sstblList) ->
                             sstblList
                             |> List.sortByDescending (fun s -> s.Timestamp)
-                            |> List.tryPick (fun sstbl -> sstbl.TryGet (key)))
+                            |> List.tryPick (fun sstbl -> sstbl.TryGet key))
 
                     match sstblLocationOption with
                     | Some valueLocation -> return! async { return (resolveValue valueLocation) }
@@ -648,7 +647,7 @@ type OcisDB
                         // If not found anywhere
                         return Ok None
         with ex ->
-            return Error ($"Failed to get value for key {Encoding.UTF8.GetString (key)}: {ex.Message}")
+            return Error $"Failed to get value for key {Encoding.UTF8.GetString key}: {ex.Message}"
     }
 
     /// <summary>
@@ -659,10 +658,10 @@ type OcisDB
     member this.Delete (key : byte array) : Async<Result<unit, string>> = async {
         try
             // 1. Write deletion marker to WAL
-            this.WAL.Append (WalEntry.Delete (key))
+            this.WAL.Append (WalEntry.Delete key)
 
             // 2. Add deletion marker to CurrentMemTable
-            currentMemtbl.Delete (key) // Memtbl.Delete already adds -1L
+            currentMemtbl.Delete key // Memtbl.Delete already adds -1L
 
             // Check MemTable size and trigger flush if needed (same logic as Set)
             // Assuming Memtbl has a Count property or similar mechanism to get its size.
@@ -670,11 +669,11 @@ type OcisDB
 
             if memtblCount >= flushThreshold then
                 let frozenMemtbl = currentMemtbl
-                immutableMemtbl.Enqueue (frozenMemtbl)
+                immutableMemtbl.Enqueue frozenMemtbl
                 currentMemtbl <- Memtbl () // Create a new empty MemTable
                 compactionAgent.Post (FlushMemtable frozenMemtbl) // Notify compaction agent to flush
 
             return Ok ()
         with ex ->
-            return Error ($"Failed to delete key {Encoding.UTF8.GetString (key)}: {ex.Message}")
+            return Error $"Failed to delete key {Encoding.UTF8.GetString key}: {ex.Message}"
     }

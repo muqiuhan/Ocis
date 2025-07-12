@@ -1,7 +1,6 @@
 module Ocis.Server.Connection
 
 open System
-open System.IO
 open System.Net.Sockets
 open System.Threading
 open Ocis.Server.ProtocolSpec
@@ -39,7 +38,7 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
             while continueProcessing
                   && not cancellationTokenSource.Token.IsCancellationRequested
                   && socket.Connected do
-                match! this.ReadMessageAsync (networkStream) with
+                match! this.ReadMessageAsync networkStream with
                 | Some request ->
                     let! response = RequestHandler.ProcessValidRequest db request
                     do! this.SendResponseAsync (networkStream, response)
@@ -58,10 +57,10 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
     member private this.ReadMessageAsync (stream : NetworkStream) = async {
         try
             // Read header
-            let headerBuffer = Array.zeroCreate<byte> ProtocolSpec.HEADER_SIZE
-            let! headerBytesRead = this.ReadExactAsync (stream, headerBuffer, ProtocolSpec.HEADER_SIZE)
+            let headerBuffer = Array.zeroCreate<byte> HEADER_SIZE
+            let! headerBytesRead = this.ReadExactAsync (stream, headerBuffer, HEADER_SIZE)
 
-            if headerBytesRead < ProtocolSpec.HEADER_SIZE then
+            if headerBytesRead < HEADER_SIZE then
                 return None
             else
                 match Protocol.TryParseRequestHeader headerBuffer with
@@ -69,11 +68,11 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
                     if Protocol.IsValidPacketSize header.TotalPacketLength then
                         // Read complete packet
                         let packetBuffer = Array.zeroCreate<byte> header.TotalPacketLength
-                        Array.Copy (headerBuffer, packetBuffer, ProtocolSpec.HEADER_SIZE)
+                        Array.Copy (headerBuffer, packetBuffer, HEADER_SIZE)
 
-                        let remainingBytes = header.TotalPacketLength - ProtocolSpec.HEADER_SIZE
+                        let remainingBytes = header.TotalPacketLength - HEADER_SIZE
                         if remainingBytes > 0 then
-                            let! remainingBytesRead = this.ReadExactAsync (stream, packetBuffer, remainingBytes, ProtocolSpec.HEADER_SIZE)
+                            let! remainingBytesRead = this.ReadExactAsync (stream, packetBuffer, remainingBytes, HEADER_SIZE)
                             if remainingBytesRead < remainingBytes then
                                 return None
                             else
@@ -128,7 +127,7 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
                 stream.WriteAsync (responseBytes, 0, responseBytes.Length, cancellationTokenSource.Token)
                 |> Async.AwaitTask
             do!
-                stream.FlushAsync (cancellationTokenSource.Token)
+                stream.FlushAsync cancellationTokenSource.Token
                 |> Async.AwaitTask
         with ex ->
             Logger.Error $"Connection {connectionId} send response error: {ex.Message}"
@@ -141,7 +140,7 @@ type Connection (socket : Socket, db : OcisDB, connectionId : string) =
             try
                 cancellationTokenSource.Cancel ()
                 if socket.Connected then
-                    socket.Shutdown (SocketShutdown.Both)
+                    socket.Shutdown SocketShutdown.Both
                 socket.Close ()
                 state <- ConnectionState.Disconnected
                 Logger.Debug $"Connection {connectionId} closed"

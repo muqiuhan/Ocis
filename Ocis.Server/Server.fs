@@ -4,7 +4,6 @@ open System
 open System.Net
 open System.Net.Sockets
 open System.Threading
-open System.Threading.Tasks
 open System.Collections.Concurrent
 open Ocis.Server.Connection
 open Ocis.OcisDB
@@ -35,7 +34,7 @@ type TcpServer (config : ServerConfig, db : OcisDB) =
     let cancellationTokenSource = new CancellationTokenSource ()
 
     // Active connection management
-    let activeConnections = new ConcurrentDictionary<string, Connection> ()
+    let activeConnections = ConcurrentDictionary<string, Connection>()
 
     member _.Config = config
     member _.State = state
@@ -47,7 +46,7 @@ type TcpServer (config : ServerConfig, db : OcisDB) =
             Logger.Info $"Starting TCP server on {config.Host}:{config.Port}"
 
             // Create and start TCP listener
-            let endpoint = IPEndPoint (IPAddress.Parse (config.Host), config.Port)
+            let endpoint = IPEndPoint (IPAddress.Parse config.Host, config.Port)
             let listener = new TcpListener (endpoint)
             listener.Start ()
             tcpListener <- Some listener
@@ -56,7 +55,7 @@ type TcpServer (config : ServerConfig, db : OcisDB) =
             Logger.Info $"TCP server started successfully on {config.Host}:{config.Port}"
 
             // Start accepting connections
-            do! this.AcceptConnectionsAsync (listener)
+            do! this.AcceptConnectionsAsync listener
 
         with ex ->
             state <- ServerState.Error ex.Message
@@ -72,7 +71,7 @@ type TcpServer (config : ServerConfig, db : OcisDB) =
                     // Check connection limit
                     if activeConnections.Count >= config.MaxConnections then
                         Logger.Warn $"Maximum connections ({config.MaxConnections}) reached, waiting..."
-                        do! Async.Sleep (1000)
+                        do! Async.Sleep 1000
                     else
                         // Accept new connection
                         let! tcpClient = listener.AcceptTcpClientAsync () |> Async.AwaitTask
@@ -92,11 +91,11 @@ type TcpServer (config : ServerConfig, db : OcisDB) =
                         Logger.Debug $"New connection accepted: {connection.ConnectionId}, total connections: {activeConnections.Count}"
 
                         // Asynchronously handle connection
-                        this.HandleConnectionAsync (connection) |> Async.Start
+                        this.HandleConnectionAsync connection |> Async.Start
 
                 with ex ->
                     Logger.Error $"Error accepting connection: {ex.Message}"
-                    do! Async.Sleep (100) // Short wait and retry
+                    do! Async.Sleep 100 // Short wait and retry
 
         with ex ->
             Logger.Error $"Error in connection accept loop: {ex.Message}"
@@ -113,7 +112,7 @@ type TcpServer (config : ServerConfig, db : OcisDB) =
                 Logger.Error $"Error handling connection {connection.ConnectionId}: {ex.Message}"
         finally
             // Clean up connection
-            activeConnections.TryRemove (connection.ConnectionId)
+            activeConnections.TryRemove connection.ConnectionId
             |> ignore
             Logger.Debug $"Connection {connection.ConnectionId} removed, remaining connections: {activeConnections.Count}"
     }
@@ -203,7 +202,7 @@ module ServerManager =
                 Async.StartChild (
                     async {
                         while not cancellationToken.IsCancellationRequested do
-                            do! Async.Sleep (1000)
+                            do! Async.Sleep 1000
                     }
                 )
 

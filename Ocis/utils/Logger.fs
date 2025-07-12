@@ -3,7 +3,6 @@ module Ocis.Utils.Logger
 
 open System.Runtime.CompilerServices
 open Microsoft.Extensions.Logging
-open Microsoft.Extensions.Logging.Console
 
 module Logger =
     let mutable LOGGER_FACTORY =
@@ -13,10 +12,10 @@ module Logger =
                     options.IncludeScopes <- true
                     options.SingleLine <- true
                     options.TimestampFormat <- "HH:mm:ss ")
-                .SetMinimumLevel (LogLevel.Information)
+                .SetMinimumLevel LogLevel.Information
             |> ignore)
 
-    let mutable LOGGER = LOGGER_FACTORY.CreateLogger ("Ocis")
+    let mutable LOGGER = LOGGER_FACTORY.CreateLogger "Ocis"
 
     let inline SetLogLevel (level : LogLevel) =
         LOGGER_FACTORY <-
@@ -26,25 +25,25 @@ module Logger =
                         options.IncludeScopes <- true
                         options.SingleLine <- true
                         options.TimestampFormat <- "HH:mm:ss ")
-                    .SetMinimumLevel (level)
+                    .SetMinimumLevel level
                 |> ignore)
-        LOGGER <- LOGGER_FACTORY.CreateLogger ("Ocis")
+        LOGGER <- LOGGER_FACTORY.CreateLogger "Ocis"
 
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Info (message : string) = LOGGER.LogInformation (message)
+    let inline Info (message : string) = LOGGER.LogInformation message
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Error (message : string) = LOGGER.LogError (message)
+    let inline Error (message : string) = LOGGER.LogError message
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Warn (message : string) = LOGGER.LogWarning (message)
+    let inline Warn (message : string) = LOGGER.LogWarning message
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Debug (message : string) = LOGGER.LogDebug (message)
+    let inline Debug (message : string) = LOGGER.LogDebug message
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Fatal (message : string) = LOGGER.LogCritical (message)
+    let inline Fatal (message : string) = LOGGER.LogCritical message
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
-    let inline Verbose (message : string) = LOGGER.LogTrace (message)
+    let inline Verbose (message : string) = LOGGER.LogTrace message

@@ -1,10 +1,7 @@
 module Ocis.Server.Tests.TestClient
 
-open System
 open System.IO
 open System.Net.Sockets
-open System.Threading.Tasks
-open Ocis.Server.Protocol
 open Ocis.Server.ProtocolSpec
 
 /// Client operation result
@@ -27,16 +24,16 @@ type TestClient (host : string, port : int) =
         use ms = new MemoryStream ()
         use writer = new BinaryWriter (ms)
 
-        writer.Write (request.MagicNumber)
-        writer.Write (request.Version)
+        writer.Write request.MagicNumber
+        writer.Write request.Version
         writer.Write (byte request.CommandType)
-        writer.Write (request.TotalPacketLength)
-        writer.Write (request.KeyLength)
-        writer.Write (request.ValueLength)
-        writer.Write (request.Key)
+        writer.Write request.TotalPacketLength
+        writer.Write request.KeyLength
+        writer.Write request.ValueLength
+        writer.Write request.Key
 
         match request.Value with
-        | Some value -> writer.Write (value)
+        | Some value -> writer.Write value
         | None -> ()
 
         ms.ToArray ()
@@ -68,14 +65,14 @@ type TestClient (host : string, port : int) =
 
         let value =
             if valueLength > 0 then
-                Some (reader.ReadBytes (valueLength))
+                Some (reader.ReadBytes valueLength)
             else
                 None
 
         let errorMessage =
             if errorMessageLength > 0 then
-                let errorBytes = reader.ReadBytes (errorMessageLength)
-                Some (System.Text.Encoding.UTF8.GetString (errorBytes))
+                let errorBytes = reader.ReadBytes errorMessageLength
+                Some (System.Text.Encoding.UTF8.GetString errorBytes)
             else
                 None
 
@@ -95,7 +92,7 @@ type TestClient (host : string, port : int) =
         use stream = this.CreateConnection ()
 
         // Send request
-        let requestBytes = this.SerializeRequest (request)
+        let requestBytes = this.SerializeRequest request
         stream.Write (requestBytes, 0, requestBytes.Length)
         stream.Flush ()
 
@@ -119,7 +116,7 @@ type TestClient (host : string, port : int) =
             else
                 headerBytes
 
-        this.DeserializeResponse (fullResponse)
+        this.DeserializeResponse fullResponse
 
     /// SET operation
     member this.Set (key : byte array, value : byte array) =
@@ -135,14 +132,14 @@ type TestClient (host : string, port : int) =
                 Value = Some value
             }
 
-            let response = this.SendRequest (request)
+            let response = this.SendRequest request
             match response.StatusCode with
             | StatusCode.Success -> Success ()
             | StatusCode.Error -> Error (response.ErrorMessage |> Option.defaultValue "Unknown error")
-            | _ -> Error ("Unexpected response status")
+            | _ -> Error "Unexpected response status"
 
         with ex ->
-            Error (ex.Message)
+            Error ex.Message
 
     /// GET operation
     member this.Get (key : byte array) =
@@ -158,18 +155,18 @@ type TestClient (host : string, port : int) =
                 Value = None
             }
 
-            let response = this.SendRequest (request)
+            let response = this.SendRequest request
             match response.StatusCode with
             | StatusCode.Success ->
                 match response.Value with
-                | Some value -> Success (value)
-                | None -> Error ("Success response missing value")
+                | Some value -> Success value
+                | None -> Error "Success response missing value"
             | StatusCode.NotFound -> NotFound
             | StatusCode.Error -> Error (response.ErrorMessage |> Option.defaultValue "Unknown error")
-            | _ -> Error ("Unexpected response status")
+            | _ -> Error "Unexpected response status"
 
         with ex ->
-            Error (ex.Message)
+            Error ex.Message
 
     /// DELETE operation
     member this.Delete (key : byte array) =
@@ -185,26 +182,26 @@ type TestClient (host : string, port : int) =
                 Value = None
             }
 
-            let response = this.SendRequest (request)
+            let response = this.SendRequest request
             match response.StatusCode with
             | StatusCode.Success -> Success ()
             | StatusCode.Error -> Error (response.ErrorMessage |> Option.defaultValue "Unknown error")
-            | _ -> Error ("Unexpected response status")
+            | _ -> Error "Unexpected response status"
 
         with ex ->
-            Error (ex.Message)
+            Error ex.Message
 
 /// Client helper functions
 module TestClientHelper =
 
     /// Create test client
-    let createClient (host : string) (port : int) = new TestClient (host, port)
+    let createClient (host : string) (port : int) = TestClient(host, port)
 
     /// String to byte array
-    let stringToBytes (s : string) = System.Text.Encoding.UTF8.GetBytes (s)
+    let stringToBytes (s : string) = System.Text.Encoding.UTF8.GetBytes s
 
     /// Byte array to string
-    let bytesToString (bytes : byte array) = System.Text.Encoding.UTF8.GetString (bytes)
+    let bytesToString (bytes : byte array) = System.Text.Encoding.UTF8.GetString bytes
 
     /// Test connection availability
     let testConnection (host : string) (port : int) =

@@ -26,7 +26,7 @@ type Wal (path : string, fileStream : FileStream) =
     member _.FileStream = fileStream
 
     // Implements IDisposable to ensure the FileStream is properly closed
-    interface System.IDisposable with
+    interface IDisposable with
         member this.Dispose () = this.FileStream.Dispose ()
 
     /// <summary>
@@ -54,11 +54,11 @@ type Wal (path : string, fileStream : FileStream) =
 
             match entry with
             | WalEntry.Set (key, valueLocation) ->
-                writer.Write (0uy) // 0 indicates Set type
+                writer.Write 0uy // 0 indicates Set type
                 Serialization.writeByteArray writer key
                 Serialization.writeValueLocation writer valueLocation
-            | WalEntry.Delete (key) ->
-                writer.Write (1uy) // 1 indicates Delete type
+            | WalEntry.Delete key ->
+                writer.Write 1uy // 1 indicates Delete type
                 Serialization.writeByteArray writer key
 
         // fileStream.Flush() // Ensure data is written to disk (Moved to OcisDB for batched flushing)
@@ -71,7 +71,7 @@ type Wal (path : string, fileStream : FileStream) =
     /// <param name="path">The path of the WAL file.</param>
     /// <returns>A sequence containing all WalEntries.</returns>
     static member Replay (path : string) : seq<WalEntry> = seq {
-        if not (File.Exists (path)) then
+        if not (File.Exists path) then
             yield! Seq.empty
         else
             try
@@ -89,7 +89,7 @@ type Wal (path : string, fileStream : FileStream) =
                         yield WalEntry.Set (key, valueLocation)
                     | 1uy -> // Delete type
                         let key = Serialization.readByteArray reader
-                        yield WalEntry.Delete (key)
+                        yield WalEntry.Delete key
                     | _ ->
                         // Encountered unknown or corrupted entry, skip or log error
                         Logger.Warn $"Encountered unknown WAL entry type {int entryType} in WAL file '{path}'."
