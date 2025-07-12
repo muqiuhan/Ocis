@@ -78,7 +78,7 @@ type SSTbl
     // Implement Collections.IEnumerable (non-generic version)
     interface IEnumerable with
         member this.GetEnumerator () =
-            (this :> IEnumerable<KeyValuePair<byte array, ValueLocation>>).GetEnumerator () :> System.Collections.IEnumerator
+            (this :> IEnumerable<KeyValuePair<byte array, ValueLocation>>).GetEnumerator () :> IEnumerator
 
     /// <summary>
     /// Flush the data from Memtbl to a new SSTable file.
@@ -105,7 +105,7 @@ type SSTbl
 
             currentHighKey <- key // Update HighKey to the current key on each iteration
 
-            recordOffsets.Add (fileStream.Position) // Record the starting offset of the current key-value pair in the file
+            recordOffsets.Add fileStream.Position // Record the starting offset of the current key-value pair in the file
             Serialization.writeByteArray writer key
             Serialization.writeValueLocation writer valueLocation)
 
@@ -118,17 +118,17 @@ type SSTbl
         let indexBlockStartOffset = fileStream.Position
 
         for offset in recordOffsets do
-            writer.Write (offset) // Write the offset of each key-value pair
+            writer.Write offset // Write the offset of each key-value pair
 
         // 3. Write footer/metadata block (Footer/Metadata Block)
         // The starting offset of the footer
         let footerStartOffset = fileStream.Position
-        writer.Write (timestamp)
-        writer.Write (level)
+        writer.Write timestamp
+        writer.Write level
         Serialization.writeByteArray writer actualLowKey
         Serialization.writeByteArray writer actualHighKey
-        writer.Write (indexBlockStartOffset) // Write the starting offset of the index block
-        writer.Write (recordOffsets.Count) // Write the number of entries in the index block
+        writer.Write indexBlockStartOffset // Write the starting offset of the index block
+        writer.Write recordOffsets.Count // Write the number of entries in the index block
         let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
         writer.Write (footerSize |> int32) // Write the total size of the footer (int32)
 
@@ -172,7 +172,7 @@ type SSTbl
             let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
 
             for i = 0 to indexEntriesCount - 1 do
-                recordOffsets.[i] <- reader.ReadInt64 ()
+                recordOffsets[i] <- reader.ReadInt64 ()
 
             Some (new SSTbl (path, timestamp, level, fileStream, reader, recordOffsets, lowKey, highKey))
         with
@@ -224,7 +224,7 @@ type SSTbl
 
             while low <= high && not found do
                 let midIdx = low + (high - low) / 2
-                let currentOffset = recordOffsets.[midIdx]
+                let currentOffset = recordOffsets[midIdx]
 
                 // Move the read/write position of the FileStream to the current offset
                 fileStream.Seek (currentOffset, SeekOrigin.Begin) |> ignore

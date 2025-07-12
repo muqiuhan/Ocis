@@ -1,6 +1,5 @@
 ﻿module Ocis.Server.Program
 
-open System.IO
 open FSharp.SystemCommandLine
 open Input
 open Ocis.Server.Config

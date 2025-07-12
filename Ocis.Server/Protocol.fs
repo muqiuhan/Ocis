@@ -1,6 +1,5 @@
 module Ocis.Server.Protocol
 
-open System
 open System.IO
 open System.Text
 open Ocis.Server.ProtocolSpec
@@ -56,10 +55,10 @@ module Protocol =
                     ms.Seek (int64 HEADER_SIZE, SeekOrigin.Begin) |> ignore
 
                     // Read payload
-                    let key = reader.ReadBytes (header.KeyLength)
+                    let key = reader.ReadBytes header.KeyLength
                     let value =
                         if header.ValueLength > 0 then
-                            Some (reader.ReadBytes (header.ValueLength))
+                            Some (reader.ReadBytes header.ValueLength)
                         else
                             None
 
@@ -76,22 +75,22 @@ module Protocol =
         use writer = new BinaryWriter (ms)
 
         // Write header
-        writer.Write (packet.MagicNumber)
-        writer.Write (packet.Version)
+        writer.Write packet.MagicNumber
+        writer.Write packet.Version
         writer.Write (byte packet.StatusCode)
-        writer.Write (packet.TotalPacketLength)
-        writer.Write (packet.ValueLength)
-        writer.Write (packet.ErrorMessageLength)
+        writer.Write packet.TotalPacketLength
+        writer.Write packet.ValueLength
+        writer.Write packet.ErrorMessageLength
 
         // Write payload data
         match packet.Value with
-        | Some value -> writer.Write (value)
+        | Some value -> writer.Write value
         | None -> ()
 
         match packet.ErrorMessage with
         | Some msg ->
-            let msgBytes = Encoding.UTF8.GetBytes (msg)
-            writer.Write (msgBytes)
+            let msgBytes = Encoding.UTF8.GetBytes msg
+            writer.Write msgBytes
         | None -> ()
 
         ms.ToArray ()
@@ -128,7 +127,7 @@ module Protocol =
 
     /// Create error response
     let CreateErrorResponse (errorMessage : string) =
-        let msgBytes = Encoding.UTF8.GetBytes (errorMessage)
+        let msgBytes = Encoding.UTF8.GetBytes errorMessage
         let totalLen = HEADER_SIZE + msgBytes.Length
 
         {

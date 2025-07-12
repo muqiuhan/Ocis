@@ -1,7 +1,5 @@
 module Ocis.Server.Handler
 
-open System
-open System.Threading.Tasks
 open Ocis.Server.Protocol
 open Ocis.Server.ProtocolSpec
 open Ocis.OcisDB
@@ -29,7 +27,7 @@ module RequestHandler =
                     return Protocol.CreateErrorResponse "SET command requires a value"
 
             | CommandType.Get ->
-                let! result = db.Get (request.Key)
+                let! result = db.Get request.Key
                 match result with
                 | Ok (Some value) ->
                     Logger.Debug $"GET success: key length={request.Key.Length}, value length={value.Length}"
@@ -42,7 +40,7 @@ module RequestHandler =
                     return Protocol.CreateErrorResponse msg
 
             | CommandType.Delete ->
-                let! result = db.Delete (request.Key)
+                let! result = db.Delete request.Key
                 match result with
                 | Ok () ->
                     Logger.Debug $"DELETE success: key length={request.Key.Length}"

@@ -72,7 +72,7 @@ module Ocis =
                     // Wait for stop signal
                     try
                         while not cancellationTokenSource.Token.IsCancellationRequested do
-                            Thread.Sleep (1000)
+                            Thread.Sleep 1000
 
                             // Periodically output server status
                             let stats = server.GetStats ()
@@ -87,7 +87,7 @@ module Ocis =
 
                     // Wait for server task to complete
                     try
-                        serverTask.Wait (TimeSpan.FromSeconds (10.0)) |> ignore
+                        serverTask.Wait (TimeSpan.FromSeconds 10.0) |> ignore
                     with
                     | :? TimeoutException -> Logger.Warn "Server shutdown timeout"
                     | ex -> Logger.Error $"Error during server shutdown: {ex.Message}"

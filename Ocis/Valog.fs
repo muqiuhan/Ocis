@@ -2,7 +2,6 @@ module Ocis.Valog
 
 open System
 open System.IO
-open Ocis.ValueLocation
 open Ocis.Utils.Logger
 
 /// <summary>
@@ -68,7 +67,7 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
 
             Ok (new Valog (path, fileStream, reader, writer, head, tail))
         with ex ->
-            Error ($"Failed to open or create Value Log file '{path}': {ex.Message}")
+            Error $"Failed to open or create Value Log file '{path}': {ex.Message}"
 
     /// <summary>
     /// Append a key-value pair to the Value Log file.
@@ -88,12 +87,12 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
             fileStream.Seek (head, SeekOrigin.Begin) |> ignore
 
             // Use BinaryWriter to write data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryWriter is disposed.
-            writer.Write (key.Length)
-            writer.Write (key) // BinaryWriter directly supports writing byte array
+            writer.Write key.Length
+            writer.Write key // BinaryWriter directly supports writing byte array
 
             // Write the length of the value and the value byte array
-            writer.Write (value.Length)
-            writer.Write (value) // BinaryWriter directly
+            writer.Write value.Length
+            writer.Write value // BinaryWriter directly
             head <- fileStream.Position
             entryStartOffset // Return the offset at which this new entry starts.
         )
@@ -117,11 +116,11 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
 
                     // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
                     let keyLength = reader.ReadInt32 ()
-                    let key = reader.ReadBytes (keyLength)
+                    let key = reader.ReadBytes keyLength
 
                     // Read the length of the value and the value byte array
                     let valueLength = reader.ReadInt32 ()
-                    let value = reader.ReadBytes (valueLength)
+                    let value = reader.ReadBytes valueLength
 
                     Some (key, value) // Return the read key-value pair.
                 with
@@ -193,25 +192,25 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
             while oldFileStream.Position < oldFileStream.Length do
                 let originalOffset = oldFileStream.Position
                 let keyLength = oldReader.ReadInt32 ()
-                let key = oldReader.ReadBytes (keyLength)
+                let key = oldReader.ReadBytes keyLength
                 let valueLength = oldReader.ReadInt32 ()
-                let value = oldReader.ReadBytes (valueLength)
+                let value = oldReader.ReadBytes valueLength
 
-                if liveLocations.Contains (originalOffset) then
+                if liveLocations.Contains originalOffset then
                     let newOffset = newFileStream.Position
                     remappedLocations <- remappedLocations.Add (originalOffset, newOffset)
 
-                    newWriter.Write (keyLength)
-                    newWriter.Write (key)
-                    newWriter.Write (valueLength)
-                    newWriter.Write (value)
+                    newWriter.Write keyLength
+                    newWriter.Write key
+                    newWriter.Write valueLength
+                    newWriter.Write value
 
             // Replace old valog with new one
-            File.Delete (valog.Path)
+            File.Delete valog.Path
             File.Move (tempValogPath, valog.Path)
 
             // Reopen the Valog instance with the new file to get its updated state
-            match Valog.Create (valog.Path) with
+            match Valog.Create valog.Path with
             | Ok newValog ->
                 Logger.Debug "Valog GC: Successfully replaced Valog file."
                 return Some (Ok (newValog, remappedLocations))
@@ -222,8 +221,8 @@ type Valog (path : string, fileStream : FileStream, reader : BinaryReader, write
         with ex ->
             Logger.Error $"Valog GC Error: {ex.Message}"
             // Clean up temp file in case of error
-            if File.Exists (tempValogPath) then
-                File.Delete (tempValogPath)
+            if File.Exists tempValogPath then
+                File.Delete tempValogPath
 
             return Some (Error ex.Message)
     }
