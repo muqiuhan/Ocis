@@ -16,14 +16,14 @@ let main argv = rootCommand argv {
             if dir.Exists then
                 Ok ()
             else
-                Error $"Directory does not exist"),
+                Error "Directory does not exist"),
 
         optionMaybe "--flush-threshold"
         |> desc "Trigger Memtable flush threshold (default: 1000)"
         |> validate (fun threshold ->
             match threshold with
             | Some threshold when threshold > 0 -> Ok ()
-            | Some _ -> Error $"Threshold must be greater than 0"
+            | Some _ -> Error "Threshold must be greater than 0"
             | _ -> Ok ()),
 
         optionMaybe "--l0-compaction-threshold"
@@ -31,7 +31,7 @@ let main argv = rootCommand argv {
         |> validate (fun threshold ->
             match threshold with
             | Some threshold when threshold > 0 -> Ok ()
-            | Some _ -> Error $"Threshold must be greater than 0"
+            | Some _ -> Error "Threshold must be greater than 0"
             | _ -> Ok ()),
 
         optionMaybe "--level-size-multiplier"
@@ -39,7 +39,7 @@ let main argv = rootCommand argv {
         |> validate (fun multiplier ->
             match multiplier with
             | Some multiplier when multiplier > 0 -> Ok ()
-            | Some _ -> Error $"Multiplier must be greater than 0"
+            | Some _ -> Error "Multiplier must be greater than 0"
             | _ -> Ok ()),
 
         optionMaybe "--log-level"
@@ -72,7 +72,7 @@ let main argv = rootCommand argv {
         |> validate (fun port ->
             match port with
             | Some port when port > 0 && port <= 65535 -> Ok ()
-            | Some _ -> Error $"Port must be between 1 and 65535"
+            | Some _ -> Error "Port must be between 1 and 65535"
             | None -> Ok ()),
 
         optionMaybe "--max-connections"
@@ -80,7 +80,7 @@ let main argv = rootCommand argv {
         |> validate (fun maxConn ->
             match maxConn with
             | Some maxConn when maxConn > 0 -> Ok ()
-            | Some _ -> Error $"Max connections must be greater than 0"
+            | Some _ -> Error "Max connections must be greater than 0"
             | None -> Ok ())
     )
     setAction (fun (workingDir, flushThreshold, l0CompactionThreshold, levelSizeMultiplier, logLevel, host, port, maxConnections) ->
