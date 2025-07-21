@@ -12,6 +12,7 @@
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
     <Optimize>true</Optimize>
+    <OptimizationData>false</OptimizationData>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Memtbl.fs" />
