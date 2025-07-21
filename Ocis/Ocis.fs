@@ -18,6 +18,9 @@ type CompactionMessage =
     | TriggerCompaction // Message to trigger a compaction cycle
     | RecompactionForRemapped of Map<int64, int64> // New message to trigger recompaction for remapped value locations
 
+type FlushMessage = // New message type for FlushAgent
+    | FlushMemtable of Memtbl
+
 type GcMessage = | TriggerGC // Message to trigger garbage collection in Valog (Removed parameter)
 
 /// <summary>
@@ -33,6 +36,7 @@ type OcisDB
         valog : Valog,
         wal : Wal,
         compactionAgent : MailboxProcessor<CompactionMessage>,
+        flushAgent : MailboxProcessor<FlushMessage>, // New parameter for flush agent
         gcAgent : MailboxProcessor<GcMessage>,
         flushThreshold : int
     ) =
@@ -79,6 +83,7 @@ type OcisDB
 
     member _.WAL = wal
     member _.CompactionAgent = compactionAgent
+    member _.FlushAgent = flushAgent // New public member
     member _.GCAgent = gcAgent
 
     // Implement IDisposable for OcisDB to ensure all underlying resources are properly closed
@@ -87,6 +92,7 @@ type OcisDB
             // Stop agents first
             compactionAgent.Dispose ()
             this.GCAgent.Dispose ()
+            this.FlushAgent.Dispose () // Dispose the new flush agent
             // Close file streams
             this.ValueLog.Close ()
             this.WAL.Close ()
@@ -284,9 +290,7 @@ type OcisDB
                     | Some sstblToCompact ->
                         let overlappingSSTables =
                             match nextLevelSSTablesOption with
-                            | Some nextLevelSSTables ->
-                                nextLevelSSTables
-                                |> List.filter sstblToCompact.Overlaps
+                            | Some nextLevelSSTables -> nextLevelSSTables |> List.filter sstblToCompact.Overlaps
                             | None -> []
 
                         let sstblsToMerge = sstblToCompact :: overlappingSSTables
@@ -369,33 +373,6 @@ type OcisDB
             let! msg = mailbox.Receive ()
 
             match msg with
-            | FlushMemtable memtblToFlush ->
-                // Logic to flush memtblToFlush to a new SSTable
-                // For simplicity, let's assume Level 0 for now.
-                let newSSTblPath = Path.Combine (dbRef.Value.Dir, $"sstbl-{Guid.NewGuid().ToString ()}.sst")
-
-                let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ()
-                let level = 0 // Always flush to Level 0
-
-                try
-                    let flushedSSTblPath = SSTbl.Flush (memtblToFlush, newSSTblPath, timestamp, level)
-
-                    match SSTbl.Open flushedSSTblPath with
-                    | Some sstbl ->
-                        // Update the SSTables map in the OcisDB instance
-                        dbRef.Value.SSTables <-
-                            dbRef.Value.SSTables
-                            |> Map.change level (fun currentListOption ->
-                                match currentListOption with
-                                | Some currentList -> Some (sstbl :: currentList)
-                                | None -> Some [ sstbl ])
-
-                        // After flushing, check if compaction is needed
-                        mailbox.Post TriggerCompaction
-                    | None -> Logger.Error $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
-                with ex ->
-                    Logger.Error $"Error flushing Memtable to SSTable: {ex.Message}"
-
             | TriggerCompaction ->
                 do! OcisDB.compactLevel0 dbRef // Try to compact Level 0 first
 
@@ -435,6 +412,43 @@ type OcisDB
                 dbRef.Value.SSTables <- updatedSSTables
                 Logger.Debug $"Completed recompaction for Valog GC. Recompacted {recompactedCount} SSTables."
                 return ()
+            | CompactionMessage.FlushMemtable _ -> failwith "FlushMemtable should be handled by flushAgentLoop"
+    }
+
+    /// <summary>
+    /// Background agent for handling Memtable flushing to SSTables.
+    /// </summary>
+    static member private flushAgentLoop (dbRef : OcisDB ref) (mailbox : MailboxProcessor<FlushMessage>) = async {
+        while true do
+            let! msg = mailbox.Receive ()
+
+            match msg with
+            | FlushMemtable memtblToFlush ->
+                // Logic to flush memtblToFlush to a new SSTable
+                let newSSTblPath = Path.Combine (dbRef.Value.Dir, $"sstbl-{Guid.NewGuid().ToString ()}.sst")
+
+                let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ()
+                let level = 0 // Always flush to Level 0
+
+                try
+                    let flushedSSTblPath = SSTbl.Flush (memtblToFlush, newSSTblPath, timestamp, level)
+
+                    match SSTbl.Open flushedSSTblPath with
+                    | Some sstbl ->
+                        // Update the SSTables map in the OcisDB instance
+                        dbRef.Value.SSTables <-
+                            dbRef.Value.SSTables
+                            |> Map.change level (fun currentListOption ->
+                                match currentListOption with
+                                | Some currentList -> Some (sstbl :: currentList)
+                                | None -> Some [ sstbl ])
+
+                        // After flushing, notify compaction agent to trigger compaction if needed
+                        // This is a simple trigger, more advanced logic could be added here later
+                        dbRef.Value.CompactionAgent.Post TriggerCompaction
+                    | None -> Logger.Error $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
+                with ex ->
+                    Logger.Error $"Error flushing Memtable to SSTable: {ex.Message}"
     }
 
     /// <summary>
@@ -539,7 +553,7 @@ type OcisDB
                     let dbRef = ref Unchecked.defaultof<OcisDB> // Placeholder, will be updated after OcisDB instance is created
 
                     let compactionAgent = MailboxProcessor.Start (OcisDB.compactionAgentLoop dbRef)
-
+                    let flushAgent = MailboxProcessor.Start (OcisDB.flushAgentLoop dbRef) // Initialize new flush agent
                     let gcAgent = MailboxProcessor.Start (OcisDB.gcAgentLoop dbRef)
 
                     let ocisDB =
@@ -551,6 +565,7 @@ type OcisDB
                             valog,
                             wal,
                             compactionAgent,
+                            flushAgent, // Pass new flush agent
                             gcAgent,
                             flushThreshold
                         )
@@ -567,7 +582,7 @@ type OcisDB
     /// <param name="key">The key to set.</param>
     /// <param name="value">The value to associate with the key.</param>
     /// <returns>An AsyncResult: Ok unit if successful, otherwise an Error string.</returns>
-    member _.Set (key : byte array, value : byte array) : Async<Result<unit, string>> = async {
+    member this.Set (key : byte array, value : byte array) : Async<Result<unit, string>> = async {
         try
             // 1. Write to ValueLog
             let valueLocation = valog.Append (key, value)
@@ -590,7 +605,7 @@ type OcisDB
                 let frozenMemtbl = currentMemtbl
                 immutableMemtbl.Enqueue frozenMemtbl
                 currentMemtbl <- Memtbl () // Create a new empty MemTable
-                compactionAgent.Post (FlushMemtable frozenMemtbl) // Notify compaction agent to flush
+                this.FlushAgent.Post (FlushMessage.FlushMemtable frozenMemtbl) // Notify flush agent to flush
 
             return Ok ()
         with ex ->
@@ -671,7 +686,7 @@ type OcisDB
                 let frozenMemtbl = currentMemtbl
                 immutableMemtbl.Enqueue frozenMemtbl
                 currentMemtbl <- Memtbl () // Create a new empty MemTable
-                compactionAgent.Post (FlushMemtable frozenMemtbl) // Notify compaction agent to flush
+                this.FlushAgent.Post (FlushMessage.FlushMemtable frozenMemtbl) // Notify flush agent to flush
 
             return Ok ()
         with ex ->
