@@ -3,9 +3,7 @@
 open NUnit.Framework
 
 [<SetUp>]
-let Setup () =
-    ()
+let Setup () = ()
 
 [<Test>]
-let Test1 () =
-    Assert.Pass()
+let Test1 () = Assert.Pass ()
