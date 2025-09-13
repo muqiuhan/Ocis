@@ -103,7 +103,10 @@ type SSTbl
 
     use writer = new BinaryWriter (fileStream)
 
-    let mutable recordOffsets = ResizeArray<int64> ()
+    // Pre-allocate capacity based on memtbl size to reduce allocations
+    let memtblCount = memtbl.Count
+    let recordOffsets = Array.zeroCreate<int64> memtblCount
+    let mutable recordIndex = 0
     let mutable currentLowKey : byte array = null
     let mutable currentHighKey : byte array = null
 
@@ -115,7 +118,8 @@ type SSTbl
 
       currentHighKey <- key // Update HighKey to the current key on each iteration
 
-      recordOffsets.Add fileStream.Position // Record the starting offset of the current key-value pair in the file
+      recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
+      recordIndex <- recordIndex + 1
       Serialization.writeByteArray writer key
       Serialization.writeValueLocation writer valueLocation)
 
@@ -140,7 +144,7 @@ type SSTbl
     Serialization.writeByteArray writer actualLowKey
     Serialization.writeByteArray writer actualHighKey
     writer.Write indexBlockStartOffset // Write the starting offset of the index block
-    writer.Write recordOffsets.Count // Write the number of entries in the index block
+    writer.Write recordIndex // Write the number of entries in the index block
     let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
     writer.Write (footerSize |> int32) // Write the total size of the footer (int32)
 
