@@ -130,8 +130,15 @@ type OcisDB
       let mergedMemtbl = Memtbl ()
       let mutable processedKeys = Set.empty<byte array> // Use a set to track processed keys
 
-      let mutable liveEntriesInNewSSTbl =
-        ResizeArray<byte array * ValueLocation> () // To collect live entries for GC
+      // Pre-allocate array for live entries to reduce allocations
+      // Estimate capacity based on input SSTables size
+      let estimatedCapacity =
+        sstblsToMerge |> List.sumBy (fun sstbl -> sstbl.Size |> int)
+
+      let liveEntriesArray =
+        Array.zeroCreate<byte array * ValueLocation> estimatedCapacity
+
+      let mutable liveEntriesCount = 0
 
       for key, valueLoc, _ in allEntries do
         if not (processedKeys.Contains key) then // Only process if key hasn't been processed yet
@@ -146,9 +153,20 @@ type OcisDB
 
           if finalValueLoc <> -1L then // Filter out deletion markers
             mergedMemtbl.Add (key, finalValueLoc)
-            liveEntriesInNewSSTbl.Add ((key, finalValueLoc)) // Collect live entries for GC
+
+            if liveEntriesCount < estimatedCapacity then
+              liveEntriesArray[liveEntriesCount] <- (key, finalValueLoc)
+              liveEntriesCount <- liveEntriesCount + 1
+          // If array is full, we'll handle this by creating a smaller final array
 
           processedKeys <- processedKeys.Add key // Mark key as processed
+
+      // Create final array with actual live entries
+      let liveEntriesInNewSSTbl =
+        if liveEntriesCount = estimatedCapacity then
+          liveEntriesArray
+        else
+          liveEntriesArray |> Array.take liveEntriesCount
 
       if mergedMemtbl.Count > 0 then
         let newSSTblPath =
@@ -164,7 +182,7 @@ type OcisDB
 
         match SSTbl.Open flushedSSTblPath with
         | Some newSSTbl ->
-          Ok (Some newSSTbl, liveEntriesInNewSSTbl |> List.ofSeq) // Return new SSTbl and live entries
+          Ok (Some newSSTbl, liveEntriesInNewSSTbl |> Array.toList) // Return new SSTbl and live entries
         | None ->
           Error $"Failed to open newly merged SSTable at {flushedSSTblPath}"
       else
@@ -468,27 +486,38 @@ type OcisDB
           let mutable recompactedCount = 0
 
           for level, sstblList in dbRef.Value.SSTables |> Map.toSeq do
-            let mutable newSSTblList = ResizeArray<SSTbl> ()
+            let sstblArray = Array.ofList sstblList
+            let newSSTblArray = Array.zeroCreate<SSTbl> sstblArray.Length
+            let mutable newSSTblCount = 0
 
-            for sstbl in sstblList do
+            for sstbl in sstblArray do
               match
                 OcisDB.recompactSSTable (dbRef, sstbl, remappedLocations)
               with
               | Ok (Some newSSTbl) ->
-                newSSTblList.Add newSSTbl
+                newSSTblArray[newSSTblCount] <- newSSTbl
+                newSSTblCount <- newSSTblCount + 1
                 (sstbl :> IDisposable).Dispose ()
                 File.Delete sstbl.Path
                 recompactedCount <- recompactedCount + 1
 
                 Logger.Debug
                   $"Recompacted SSTable {sstbl.Path} to {newSSTbl.Path} (Level {level})"
-              | Ok None -> newSSTblList.Add sstbl // No change, keep original SSTable
+              | Ok None ->
+                newSSTblArray[newSSTblCount] <- sstbl // No change, keep original SSTable
+                newSSTblCount <- newSSTblCount + 1
               | Error msg ->
                 Logger.Error $"Error recompacting SSTable {sstbl.Path}: {msg}"
-                newSSTblList.Add sstbl // On error, keep original SSTable
+                newSSTblArray[newSSTblCount] <- sstbl // On error, keep original SSTable
+                newSSTblCount <- newSSTblCount + 1
 
-            updatedSSTables <-
-              updatedSSTables |> Map.add level (newSSTblList |> List.ofSeq)
+            let finalSSTblList =
+              if newSSTblCount = sstblArray.Length then
+                newSSTblArray |> Array.toList
+              else
+                newSSTblArray |> Array.take newSSTblCount |> Array.toList
+
+            updatedSSTables <- updatedSSTables |> Map.add level finalSSTblList
 
           dbRef.Value.SSTables <- updatedSSTables
 
