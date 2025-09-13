@@ -17,9 +17,22 @@ type CompactionMessage =
   | FlushMemtable of Memtbl // Message to flush an immutable memtable to SSTable
   | TriggerCompaction // Message to trigger a compaction cycle
   | RecompactionForRemapped of Map<int64, int64> // New message to trigger recompaction for remapped value locations
+  | ParallelCompaction of int // Message to trigger parallel compaction for a specific level
 
 type FlushMessage = // New message type for FlushAgent
   | FlushMemtable of Memtbl
+
+// Compaction strategy types
+type CompactionPriority =
+  | High // Level 0 SSTables or size-triggered
+  | Medium // Overlap-triggered
+  | Low // Background compaction
+
+type SSTableCandidate =
+  { SSTable : SSTbl
+    Priority : CompactionPriority
+    OverlapSize : int64
+    Score : float } // Combined score for selection
 
 type GcMessage = | TriggerGC // Message to trigger garbage collection in Valog (Removed parameter)
 
@@ -49,6 +62,12 @@ type OcisDB
   /// Each level is approximately 10 times larger than the previous one
   static let mutable LEVEL_SIZE_MULTIPLIER = 5
 
+  /// Maximum number of parallel compaction tasks
+  static let mutable MAX_PARALLEL_COMPACTIONS = 3
+
+  /// Compaction score threshold for triggering compaction
+  static let mutable COMPACTION_SCORE_THRESHOLD = 1.0
+
   let mutable ssTables = ssTables
   let mutable currentMemtbl = currentMemtbl
   let mutable valog = valog
@@ -61,6 +80,128 @@ type OcisDB
   static member LevelSizeMultiplier
     with get () = LEVEL_SIZE_MULTIPLIER
     and set (multiplier : int) = LEVEL_SIZE_MULTIPLIER <- multiplier
+
+  static member MaxParallelCompactions
+    with get () = MAX_PARALLEL_COMPACTIONS
+    and set (max : int) = MAX_PARALLEL_COMPACTIONS <- max
+
+  static member CompactionScoreThreshold
+    with get () = COMPACTION_SCORE_THRESHOLD
+    and set (threshold : float) = COMPACTION_SCORE_THRESHOLD <- threshold
+
+  /// <summary>
+  /// Calculate compaction priority for an SSTable based on various factors
+  /// </summary>
+  static member private calculateCompactionPriority
+    (sstbl : SSTbl, level : int, nextLevelSSTables : SSTbl list option)
+    : CompactionPriority
+    =
+    if level = 0 then
+      High // Level 0 always has high priority
+    else
+      match nextLevelSSTables with
+      | Some nextSSTables ->
+        let overlapSize =
+          nextSSTables
+          |> List.filter sstbl.Overlaps
+          |> List.sumBy _.Size
+          |> int64
+
+        let levelSize =
+          int64 L0_COMPACTION_THRESHOLD
+          * (pown (int64 LEVEL_SIZE_MULTIPLIER) (level - 1))
+
+        let sizeRatio = float sstbl.Size / float levelSize
+
+        if overlapSize > 0L && sizeRatio > 0.8 then High
+        elif overlapSize > 0L then Medium
+        else Low
+      | None -> Low
+
+  /// <summary>
+  /// Calculate a score for SSTable compaction priority
+  /// Higher score means higher priority for compaction
+  /// </summary>
+  static member private calculateCompactionScore
+    (sstbl : SSTbl, level : int, nextLevelSSTables : SSTbl list option)
+    : float
+    =
+    let ageScore =
+      float sstbl.Timestamp
+      / float (System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ())
+
+    let sizeScore = float sstbl.Size / 1024.0 / 1024.0 // Size in MB
+
+    let overlapScore =
+      match nextLevelSSTables with
+      | Some nextSSTables ->
+        nextSSTables
+        |> List.filter sstbl.Overlaps
+        |> List.sumBy _.Size
+        |> float
+        |> fun x -> x / 1024.0 / 1024.0 // Convert to MB
+      | None -> 0.0
+
+    // Weighted combination of factors
+    let levelWeight = if level = 0 then 10.0 else 1.0
+    ageScore * 0.3 + sizeScore * 0.3 + overlapScore * 0.4 + levelWeight
+
+  /// <summary>
+  /// Select best SSTables for compaction using improved strategy
+  /// </summary>
+  static member private selectSSTablesForCompaction
+    (dbRef : OcisDB ref, level : int)
+    : SSTableCandidate list
+    =
+    let currentLevelSSTables = dbRef.Value.SSTables |> Map.tryFind level
+    let nextLevelSSTables = dbRef.Value.SSTables |> Map.tryFind (level + 1)
+
+    match currentLevelSSTables with
+    | Some sstables when not (sstables |> List.isEmpty) ->
+      sstables
+      |> List.map (fun sstbl ->
+        let priority =
+          OcisDB.calculateCompactionPriority (sstbl, level, nextLevelSSTables)
+
+        let overlapSize =
+          match nextLevelSSTables with
+          | Some nextSSTables ->
+            nextSSTables
+            |> List.filter sstbl.Overlaps
+            |> List.sumBy _.Size
+            |> int64
+          | None -> 0L
+
+        let score =
+          OcisDB.calculateCompactionScore (sstbl, level, nextLevelSSTables)
+
+        { SSTable = sstbl
+          Priority = priority
+          OverlapSize = overlapSize
+          Score = score })
+      |> List.sortByDescending (fun candidate ->
+        candidate.Score, candidate.Priority)
+    | _ -> []
+
+  /// <summary>
+  /// Find SSTables that contain remapped value locations for selective recompaction
+  /// </summary>
+  static member private findSSTablesWithRemappedValues
+    (dbRef : OcisDB ref, remappedLocations : Map<int64, int64>)
+    : SSTbl list
+    =
+    let remappedValueSet =
+      remappedLocations |> Map.toSeq |> Seq.map fst |> Set.ofSeq
+
+    dbRef.Value.SSTables
+    |> Map.toSeq
+    |> Seq.collect (fun (_, sstblList) ->
+      sstblList
+      |> List.filter (fun sstbl ->
+        sstbl
+        |> Seq.exists (fun (KeyValue (_, valueLoc)) ->
+          remappedValueSet.Contains valueLoc)))
+    |> Seq.toList
 
   member _.Dir = dir
 
@@ -247,7 +388,7 @@ type OcisDB
       Error $"Error recompacting SSTable {sstbl.Path}: {ex.Message}"
 
   /// <summary>
-  /// Performs compaction for Level 0 SSTables.
+  /// Performs optimized compaction for Level 0 SSTables with intelligent selection.
   /// </summary>
   static member private compactLevel0 (dbRef : OcisDB ref) : Async<unit> =
     async {
@@ -257,28 +398,47 @@ type OcisDB
       | Some level0SSTables when
         level0SSTables.Length >= L0_COMPACTION_THRESHOLD
         ->
-        let sstblsToMerge = level0SSTables
-        let targetLevel = 1 // Always merge L0 to L1
+        // Use intelligent selection for Level 0
+        let candidates = OcisDB.selectSSTablesForCompaction (dbRef, 0)
 
-        match
-          OcisDB.compact (
-            dbRef,
-            0,
-            sstblsToMerge,
-            targetLevel,
-            Some dbRef.Value.PendingRemappedLocations
-          )
-        with
-        | Ok (newSSTblOption, liveEntries) ->
-          do!
-            OcisDB.updateSSTablesAfterCompaction (
+        // Select top candidates with high priority or score above threshold
+        let selectedCandidates =
+          candidates
+          |> List.filter (fun c ->
+            match c.Priority with
+            | High -> true
+            | Medium -> c.Score >= COMPACTION_SCORE_THRESHOLD
+            | Low -> false)
+          |> List.truncate (max 2 (level0SSTables.Length / 2)) // Merge at most half of L0 SSTables
+
+        if not selectedCandidates.IsEmpty then
+          let sstblsToMerge = selectedCandidates |> List.map _.SSTable
+          let targetLevel = 1
+
+          Logger.Debug
+            $"Level 0 compaction: Selected {sstblsToMerge.Length} out of {level0SSTables.Length} SSTables for compaction"
+
+          match
+            OcisDB.compact (
               dbRef,
-              newSSTblOption,
+              0,
               sstblsToMerge,
-              []
-            ) // No SSTables to remove from target level for L0 compaction
-
-        | Error msg -> Logger.Error $"Error during Level 0 compaction: {msg}"
+              targetLevel,
+              Some dbRef.Value.PendingRemappedLocations
+            )
+          with
+          | Ok (newSSTblOption, liveEntries) ->
+            do!
+              OcisDB.updateSSTablesAfterCompaction (
+                dbRef,
+                newSSTblOption,
+                sstblsToMerge,
+                []
+              )
+          | Error msg -> Logger.Error $"Error during Level 0 compaction: {msg}"
+        else
+          Logger.Debug
+            "Level 0 compaction: No suitable SSTables found for compaction"
       | _ -> () // No compaction needed for Level 0
     }
 
@@ -371,8 +531,7 @@ type OcisDB
     }
 
   /// <summary>
-  /// Performs compaction for levels greater than 0 (Leveled Compaction).
-  /// This is a simplified version and will need to be expanded for full Leveled Compaction.
+  /// Performs optimized compaction for levels greater than 0 using intelligent SSTable selection.
   /// </summary>
   static member private compactLevel
     (dbRef : OcisDB ref, level : int)
@@ -381,82 +540,87 @@ type OcisDB
     async {
       let nextLevel = level + 1
 
+      // Use intelligent selection strategy
+      let candidates = OcisDB.selectSSTablesForCompaction (dbRef, level)
+
+      if candidates.IsEmpty then
+        Logger.Debug $"Level {level}: No SSTables available for compaction"
+        return ()
+
+      // Select best candidates for compaction
+      let selectedCandidates =
+        candidates
+        |> List.filter (fun c ->
+          match c.Priority with
+          | High -> true
+          | Medium -> c.Score >= COMPACTION_SCORE_THRESHOLD
+          | Low -> false)
+        |> List.truncate 3 // Limit to 3 SSTables per compaction to reduce write amplification
+
+      if selectedCandidates.IsEmpty then
+        Logger.Debug $"Level {level}: No suitable SSTables found for compaction"
+        return ()
+
       let currentLevelSSTablesOption = dbRef.Value.SSTables |> Map.tryFind level
 
       let nextLevelSSTablesOption =
         dbRef.Value.SSTables |> Map.tryFind nextLevel
 
-      match currentLevelSSTablesOption with
-      | Some currentLevelSSTables when
-        not (currentLevelSSTables |> List.isEmpty)
-        ->
-        let targetLevelSize =
-          int64 L0_COMPACTION_THRESHOLD
-          * (pown (int64 LEVEL_SIZE_MULTIPLIER) (level - 1))
+      let targetLevelSize =
+        int64 L0_COMPACTION_THRESHOLD
+        * (pown (int64 LEVEL_SIZE_MULTIPLIER) (level - 1))
 
-        let currentLevelTotalSize = currentLevelSSTables |> List.sumBy _.Size
+      let currentLevelTotalSize =
+        match currentLevelSSTablesOption with
+        | Some sstables -> sstables |> List.sumBy _.Size
+        | None -> 0L
 
-        if currentLevelTotalSize >= targetLevelSize then
-          let mutable bestSSTblToCompact : SSTbl option = None
-          let mutable maxOverlapSize = -1L
+      // Only proceed if level size threshold is exceeded or we have high priority candidates
+      let hasHighPriority =
+        selectedCandidates |> List.exists (fun c -> c.Priority = High)
 
-          for sstbl in currentLevelSSTables do
-            let currentOverlapSize =
-              match nextLevelSSTablesOption with
-              | Some nextLevelSSTables ->
-                nextLevelSSTables
-                |> List.filter sstbl.Overlaps
-                |> List.sumBy _.Size
-                |> int64
-              | None -> 0L
+      if currentLevelTotalSize >= targetLevelSize || hasHighPriority then
+        for candidate in selectedCandidates do
+          let sstblToCompact = candidate.SSTable
 
-            if currentOverlapSize >= maxOverlapSize then
-              maxOverlapSize <- currentOverlapSize
-              bestSSTblToCompact <- Some sstbl
+          let overlappingSSTables =
+            match nextLevelSSTablesOption with
+            | Some nextLevelSSTables ->
+              nextLevelSSTables |> List.filter sstblToCompact.Overlaps
+            | None -> []
 
-          match bestSSTblToCompact with
-          | Some sstblToCompact ->
-            let overlappingSSTables =
-              match nextLevelSSTablesOption with
-              | Some nextLevelSSTables ->
-                nextLevelSSTables |> List.filter sstblToCompact.Overlaps
-              | None -> []
+          let sstblsToMerge = sstblToCompact :: overlappingSSTables
 
-            let sstblsToMerge = sstblToCompact :: overlappingSSTables
+          Logger.Debug
+            $"Level {level} compaction: Compacting SSTable with score {candidate.Score:F2}, overlap: {candidate.OverlapSize / 1024L / 1024L}MB"
 
-            let compactResult =
-              OcisDB.compact (
+          let compactResult =
+            OcisDB.compact (
+              dbRef,
+              level,
+              sstblsToMerge,
+              nextLevel,
+              Some dbRef.Value.PendingRemappedLocations
+            )
+
+          match compactResult with
+          | Ok (newSSTblOption, _) ->
+            do!
+              OcisDB.updateSSTablesAfterCompaction (
                 dbRef,
-                level,
-                sstblsToMerge,
-                nextLevel,
-                Some dbRef.Value.PendingRemappedLocations
+                newSSTblOption,
+                [ sstblToCompact ],
+                overlappingSSTables
               )
-
-            match compactResult with
-            | Ok (newSSTblOption, _) ->
-              do!
-                OcisDB.updateSSTablesAfterCompaction (
-                  dbRef,
-                  newSSTblOption,
-                  [ sstblToCompact ],
-                  overlappingSSTables
-                )
-
-              dbRef.Value.PendingRemappedLocations <- Map.empty<int64, int64> // Clear pending remapped locations
-
-            | Error msg ->
-              Logger.Error $"Error during Level {level} compaction: {msg}"
-          | None ->
-            Logger.Error
-              $"Level {level}: No suitable SSTable found for compaction (max overlap size: {maxOverlapSize})."
-        else
-          () // No compaction needed (size)
-      | _ -> () // Level has no SSTables or is empty
+          | Error msg ->
+            Logger.Error $"Error during Level {level} compaction: {msg}"
+      else
+        Logger.Debug
+          $"Level {level}: Size threshold not met ({currentLevelTotalSize} < {targetLevelSize}) and no high priority candidates"
     }
 
   /// <summary>
-  /// Background agent for handling Memtable flushing to SSTables and Compaction.
+  /// Background agent for handling Memtable flushing to SSTables and Compaction with parallel processing.
   /// </summary>
   static member private compactionAgentLoop
     (dbRef : OcisDB ref)
@@ -468,61 +632,133 @@ type OcisDB
 
         match msg with
         | TriggerCompaction ->
-          do! OcisDB.compactLevel0 dbRef // Try to compact Level 0 first
+          // Parallel compaction for improved throughput
+          let! compactionTasks =
+            async {
+              // Always try Level 0 first (highest priority)
+              let level0Task =
+                async {
+                  do! OcisDB.compactLevel0 dbRef
+                  return 0 // Return level number for logging
+                }
 
-          // Iterate through other levels and trigger compaction as needed
-          // For a more robust implementation, define a MAX_LEVEL or dynamically handle it.
-          // For demonstration, let's assume we have Levels 0, 1, 2 for now.
-          for level = 1 to 2 do // Example: compact Levels 1 and 2
-            do! OcisDB.compactLevel (dbRef, level)
+              // Create parallel tasks for other levels
+              let otherLevelTasks =
+                [ 1..5 ] // Support up to level 5
+                |> List.map (fun level ->
+                  async {
+                    do! OcisDB.compactLevel (dbRef, level)
+                    return level
+                  })
 
+              // Execute tasks with controlled parallelism
+              let allTasks = level0Task :: otherLevelTasks
+              return! Async.Parallel (allTasks, MAX_PARALLEL_COMPACTIONS)
+            }
+
+          let levelsStr = System.String.Join (", ", compactionTasks)
+          Logger.Debug $"Parallel compaction completed for levels: {levelsStr}"
+          return ()
+
+        | ParallelCompaction level ->
+          // Handle parallel compaction for a specific level
+          Logger.Debug $"Starting parallel compaction for level {level}"
+          do! OcisDB.compactLevel (dbRef, level)
           return ()
 
         | RecompactionForRemapped remappedLocations ->
           Logger.Debug
             $"Received recompaction request for {remappedLocations.Count} remapped locations."
 
+          // Selective recompaction: only recompact SSTables that contain remapped values
+          let sstablesToRecompact =
+            OcisDB.findSSTablesWithRemappedValues (dbRef, remappedLocations)
+
+          if sstablesToRecompact.IsEmpty then
+            Logger.Debug
+              "No SSTables contain remapped values, skipping recompaction."
+
+            return ()
+
+          Logger.Debug
+            $"Found {sstablesToRecompact.Length} SSTables containing remapped values for selective recompaction."
+
           let mutable updatedSSTables = dbRef.Value.SSTables
           let mutable recompactedCount = 0
 
-          for level, sstblList in dbRef.Value.SSTables |> Map.toSeq do
-            let sstblArray = Array.ofList sstblList
-            let newSSTblArray = Array.zeroCreate<SSTbl> sstblArray.Length
-            let mutable newSSTblCount = 0
+          // Group SSTables by level for efficient processing
+          let sstablesByLevel =
+            sstablesToRecompact
+            |> List.groupBy (fun sstbl -> sstbl.Level)
+            |> Map.ofList
 
-            for sstbl in sstblArray do
-              match
-                OcisDB.recompactSSTable (dbRef, sstbl, remappedLocations)
-              with
-              | Ok (Some newSSTbl) ->
-                newSSTblArray[newSSTblCount] <- newSSTbl
-                newSSTblCount <- newSSTblCount + 1
-                (sstbl :> IDisposable).Dispose ()
-                File.Delete sstbl.Path
-                recompactedCount <- recompactedCount + 1
+          // Parallel recompaction within each level
+          let! recompactionTasks =
+            async {
+              let tasks =
+                sstablesByLevel
+                |> Map.toList
+                |> List.map (fun (level, levelSSTables) ->
+                  async {
+                    let levelSSTablesArray = Array.ofList levelSSTables
 
-                Logger.Debug
-                  $"Recompacted SSTable {sstbl.Path} to {newSSTbl.Path} (Level {level})"
-              | Ok None ->
-                newSSTblArray[newSSTblCount] <- sstbl // No change, keep original SSTable
-                newSSTblCount <- newSSTblCount + 1
-              | Error msg ->
-                Logger.Error $"Error recompacting SSTable {sstbl.Path}: {msg}"
-                newSSTblArray[newSSTblCount] <- sstbl // On error, keep original SSTable
-                newSSTblCount <- newSSTblCount + 1
+                    let newSSTblArray =
+                      Array.zeroCreate<SSTbl> levelSSTablesArray.Length
 
-            let finalSSTblList =
-              if newSSTblCount = sstblArray.Length then
-                newSSTblArray |> Array.toList
-              else
-                newSSTblArray |> Array.take newSSTblCount |> Array.toList
+                    let mutable newSSTblCount = 0
+                    let mutable levelRecompactedCount = 0
 
+                    for sstbl in levelSSTablesArray do
+                      match
+                        OcisDB.recompactSSTable (
+                          dbRef,
+                          sstbl,
+                          remappedLocations
+                        )
+                      with
+                      | Ok (Some newSSTbl) ->
+                        newSSTblArray[newSSTblCount] <- newSSTbl
+                        newSSTblCount <- newSSTblCount + 1
+                        (sstbl :> IDisposable).Dispose ()
+                        File.Delete sstbl.Path
+                        levelRecompactedCount <- levelRecompactedCount + 1
+
+                        Logger.Debug
+                          $"Recompacted SSTable {sstbl.Path} to {newSSTbl.Path} (Level {level})"
+                      | Ok None ->
+                        newSSTblArray[newSSTblCount] <- sstbl // No change, keep original SSTable
+                        newSSTblCount <- newSSTblCount + 1
+                      | Error msg ->
+                        Logger.Error
+                          $"Error recompacting SSTable {sstbl.Path}: {msg}"
+
+                        newSSTblArray[newSSTblCount] <- sstbl // On error, keep original SSTable
+                        newSSTblCount <- newSSTblCount + 1
+
+                    let finalSSTblList =
+                      if newSSTblCount = levelSSTablesArray.Length then
+                        newSSTblArray |> Array.toList
+                      else
+                        newSSTblArray
+                        |> Array.take newSSTblCount
+                        |> Array.toList
+
+                    return (level, finalSSTblList, levelRecompactedCount)
+                  })
+
+              return! Async.Parallel (tasks, MAX_PARALLEL_COMPACTIONS)
+            }
+
+          // Update SSTables map with recompacted results
+          for (level, finalSSTblList, levelRecompactedCount) in
+            recompactionTasks do
             updatedSSTables <- updatedSSTables |> Map.add level finalSSTblList
+            recompactedCount <- recompactedCount + levelRecompactedCount
 
           dbRef.Value.SSTables <- updatedSSTables
 
           Logger.Debug
-            $"Completed recompaction for Valog GC. Recompacted {recompactedCount} SSTables."
+            $"Completed selective recompaction for Valog GC. Recompacted {recompactedCount} out of {sstablesToRecompact.Length} affected SSTables."
 
           return ()
         | CompactionMessage.FlushMemtable _ ->
