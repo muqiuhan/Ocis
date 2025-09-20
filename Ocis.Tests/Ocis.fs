@@ -21,7 +21,37 @@ type OcisDBTests () =
 
   [<TearDown>]
   member this.TearDown () =
-    if Directory.Exists tempDir then Directory.Delete (tempDir, true)
+    // Force GC to force garbage collection and wait for finalizers, ensuring all file handles are released
+    System.GC.Collect ()
+    System.GC.WaitForPendingFinalizers ()
+    System.GC.Collect ()
+    System.Threading.Thread.Sleep 50 // Add a small delay to allow the operating system to release handles
+
+    if Directory.Exists tempDir then
+      let maxRetries = 5
+      let mutable currentRetry = 0
+      let mutable deleted = false
+
+      while not deleted && currentRetry < maxRetries do
+        try
+          Directory.Delete (tempDir, true)
+          deleted <- true
+        with
+        | :? System.IO.IOException as ioEx ->
+          printfn
+            $"TearDown: Retry {currentRetry + 1}: Failed to delete directory '{tempDir}': {ioEx.Message}. Retrying..."
+
+          System.Threading.Thread.Sleep (100 * (currentRetry + 1)) // Exponential backoff
+          currentRetry <- currentRetry + 1
+        | ex ->
+          printfn
+            $"TearDown: Unexpected error deleting directory '{tempDir}': {ex.Message}"
+
+          reraise ()
+
+      if not deleted then
+        Assert.Fail
+          $"TearDown: Failed to delete directory '{tempDir}' after {maxRetries} retries."
 
   [<Test>]
   member this.Open_ShouldCreateNewDBAndInitializeCorrectly () =

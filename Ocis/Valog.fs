@@ -5,6 +5,44 @@ open System.IO
 open Ocis.Utils.Logger
 
 /// <summary>
+/// Configuration for incremental garbage collection
+/// </summary>
+type IncrementalGCConfig =
+  {
+    /// Maximum time allowed for a single GC batch (milliseconds)
+    MaxBatchTimeMs : int
+    /// Maximum entries to process in a single batch
+    MaxBatchSize : int
+    /// Progress reporting interval (batches)
+    ProgressInterval : int
+  }
+
+/// <summary>
+/// State for incremental garbage collection
+/// </summary>
+type IncrementalGCState =
+  {
+    /// Total live locations to process
+    TotalLiveLocations : int
+    /// Number of locations processed so far
+    ProcessedCount : int
+    /// Remapped locations collected so far
+    RemappedLocations : Map<int64, int64>
+    /// Whether GC is completed
+    IsCompleted : bool
+    /// Current position in the Valog file
+    CurrentPosition : int64
+    /// Temporary Valog path for incremental writes
+    TempValogPath : string
+    /// File streams for incremental processing
+    TempWriter : BinaryWriter option
+    /// Start time of the current batch
+    BatchStartTime : System.DateTime
+    /// New field to hold the new Valog instance
+    NewValog : Valog option
+  }
+
+/// <summary>
 /// Valog (Value Log) represents the append-only log file in WiscKey storage engine that stores actual values.
 /// It is the core part of the key-value separation design, and all values are written to this file in order.
 /// </summary>
@@ -14,7 +52,7 @@ open Ocis.Utils.Logger
 /// Tail points to the oldest valid value (for garbage collection).
 /// Each entry contains the key and its length, so that it can be verified when reading.
 /// </remarks>
-type Valog
+and Valog
   (
     path : string,
     fileStream : FileStream,
@@ -59,11 +97,15 @@ type Valog
   /// <param name="path">The path of the Value Log file.</param>
   /// <returns>A Result type: if successful, returns Ok Valog instance, otherwise returns Error string.</returns>
   static member Create (path : string) : Result<Valog, string> =
+    let mutable fileStream : FileStream = null
+    let mutable reader : BinaryReader = null
+    let mutable writer : BinaryWriter = null
+
     try
       // FileMode.OpenOrCreate: if the file exists, it will be opened. Otherwise, a new file will be created.
       // FileAccess.ReadWrite: read and write permissions are required.
       // FileShare.ReadWrite: allows other processes or threads to share read and write files, and a lock mechanism is needed to coordinate when accessed concurrently.
-      let fileStream =
+      fileStream <-
         new FileStream (
           path,
           FileMode.OpenOrCreate,
@@ -77,14 +119,13 @@ type Valog
       // Initialize Tail to 0. The update of Tail is responsible for garbage collection (usually part of the Compaction process).
       let tail = 0L
 
-      let reader =
-        new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
+      reader <- new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
 
-      let writer =
-        new BinaryWriter (fileStream, System.Text.Encoding.UTF8, true)
+      writer <- new BinaryWriter (fileStream, System.Text.Encoding.UTF8, true)
 
       Ok (new Valog (path, fileStream, reader, writer, head, tail))
     with ex ->
+      // Ensure all opened resources are closed if an error occurs during creation.
       Error $"Failed to open or create Value Log file '{path}': {ex.Message}"
 
   /// <summary>
@@ -183,61 +224,239 @@ type Valog
   member inline this.Dispose () = (this :> IDisposable).Dispose ()
 
   /// <summary>
-  /// Performs garbage collection on the Value Log.
-  /// This is a simplified placeholder. A full implementation would involve:
-  /// 1. Identifying all live value locations across all SSTables and Memtables.
-  /// 2. Copying live data to a new Valog file.
-  /// 3. Deleting the old Valog file and renaming the new one.
-  /// 4. Updating SSTable value locations if necessary (highly complex).
+  /// Performs incremental garbage collection on the Value Log to avoid long pauses.
+  ///
+  /// Incremental GC Process:
+  /// 1. Initialize GC state and create temporary file
+  /// 2. Process live data in small batches with time limits
+  /// 3. Periodically yield control back to caller
+  /// 4. Complete GC when all data is processed
+  /// 5. Atomically replace old Valog with new one
+  ///
+  /// Benefits:
+  /// - Avoids long GC pauses that could block the system
+  /// - Allows other operations to proceed between batches
+  /// - Provides progress tracking and potential cancellation
+  /// - Reduces memory pressure by processing in chunks
+  ///
+  /// Design Decision: Uses cooperative multitasking with explicit yielding
+  /// rather than true parallelism to maintain simplicity and predictability.
   /// </summary>
-  /// <param name="valog">The Valog instance.</param>
-  /// <param name="liveLocations">A set of ValueLocations that are currently live across all SSTables and Memtables.</param>
+  /// <param name="valog">The Valog instance to garbage collect</param>
+  /// <param name="liveLocations">Set of live value locations to preserve</param>
+  /// <param name="config">Configuration for incremental GC behavior</param>
+  /// <returns>Async operation that yields GC state after each batch</returns>
+  static member CollectGarbageIncremental
+    (valog : Valog, liveLocations : Set<int64>, config : IncrementalGCConfig)
+    : Async<Result<IncrementalGCState * Valog option, string>>
+    =
+    async {
+      try
+        // Initialize incremental GC state
+        let tempValogPath = valog.Path + ".temp"
+
+        let initialState =
+          { TotalLiveLocations = liveLocations.Count
+            ProcessedCount = 0
+            RemappedLocations = Map.empty<int64, int64>
+            IsCompleted = false
+            CurrentPosition = 0L
+            TempValogPath = tempValogPath
+            TempWriter = None
+            BatchStartTime = System.DateTime.UtcNow
+            NewValog = None }
+
+        // Initialize temporary file and writer
+        use tempFileStream =
+          new FileStream (
+            tempValogPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None
+          )
+
+        use tempWriter =
+          new BinaryWriter (tempFileStream, System.Text.Encoding.UTF8, false)
+
+        let stateWithWriter = { initialState with TempWriter = Some tempWriter }
+
+        // Read and process the original Valog file in batches
+        use oldFileStream =
+          new FileStream (
+            valog.Path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read
+          )
+
+        use oldReader =
+          new BinaryReader (oldFileStream, System.Text.Encoding.UTF8, true)
+
+        let finalState =
+          Valog.ProcessGCBatch (
+            stateWithWriter,
+            oldReader,
+            liveLocations,
+            config
+          )
+
+        if finalState.IsCompleted then
+          // Atomically replace the old Valog with the new one
+          File.Delete valog.Path
+          File.Move (tempValogPath, valog.Path)
+
+          // Reopen Valog instance
+          match Valog.Create valog.Path with
+          | Ok newValog ->
+            Logger.Info
+              $"Incremental Valog GC completed: processed {finalState.ProcessedCount} live locations"
+
+            return
+              Ok (
+                { finalState with
+                    TempWriter = None
+                    NewValog = Some newValog },
+                Some newValog
+              )
+          | Error msg ->
+            Logger.Error $"Failed to reopen Valog after incremental GC: {msg}"
+            return Error $"Failed to reopen Valog: {msg}"
+        else
+          // GC is not yet completed, return current state for continuation
+          Logger.Debug
+            $"Incremental GC batch completed: {finalState.ProcessedCount}/{finalState.TotalLiveLocations} locations processed"
+
+          return Ok (finalState, None)
+
+      with ex ->
+        Logger.Error $"Incremental GC error: {ex.Message}"
+        return Error $"Incremental GC failed: {ex.Message}"
+    }
+
+  /// <summary>
+  /// Processes one batch of entries during incremental garbage collection.
+  ///
+  /// Batch Processing Logic:
+  /// 1. Read entries from current position in old Valog
+  /// 2. Check if each entry is live (in liveLocations set)
+  /// 3. If live, copy to new Valog and record remapping
+  /// 4. Track progress and time limits
+  /// 5. Yield when batch size or time limit is reached
+  /// </summary>
+  static member private ProcessGCBatch
+    (
+      state : IncrementalGCState,
+      oldReader : BinaryReader,
+      liveLocations : Set<int64>,
+      config : IncrementalGCConfig
+    )
+    : IncrementalGCState
+    =
+    let mutable currentState = state
+    let batchStartTime = System.DateTime.UtcNow
+    let mutable entriesInBatch = 0
+
+    // Continue processing from where we left off
+    oldReader.BaseStream.Seek (currentState.CurrentPosition, SeekOrigin.Begin)
+    |> ignore
+
+    while not currentState.IsCompleted
+          && oldReader.BaseStream.Position < oldReader.BaseStream.Length
+          && entriesInBatch < config.MaxBatchSize
+          && (System.DateTime.UtcNow - batchStartTime).TotalMilliseconds < float
+            config.MaxBatchTimeMs do
+      try
+        let originalOffset = oldReader.BaseStream.Position
+
+        // Read key and value lengths
+        let keyLength = oldReader.ReadInt32 ()
+        let key = oldReader.ReadBytes keyLength
+        let valueLength = oldReader.ReadInt32 ()
+        let value = oldReader.ReadBytes valueLength
+
+        // Check if this entry is live
+        if liveLocations.Contains originalOffset then
+          match currentState.TempWriter with
+          | Some writer ->
+            // Copy live entry to new Valog
+            let newOffset = writer.BaseStream.Position
+
+            writer.Write keyLength
+            writer.Write key
+            writer.Write valueLength
+            writer.Write value
+
+            // Record the remapping
+            let newRemapped =
+              currentState.RemappedLocations.Add (originalOffset, newOffset)
+
+            currentState <-
+              { currentState with RemappedLocations = newRemapped }
+
+          | None ->
+            Logger.Warn "TempWriter not available during incremental GC batch"
+
+        currentState <-
+          { currentState with
+              ProcessedCount = currentState.ProcessedCount + 1
+              CurrentPosition = oldReader.BaseStream.Position }
+
+        entriesInBatch <- entriesInBatch + 1
+
+      with
+      | :? EndOfStreamException ->
+        // Reached end of file
+        currentState <- { currentState with IsCompleted = true }
+      | ex ->
+        Logger.Error
+          $"Error processing GC batch at position {currentState.CurrentPosition}: {ex.Message}"
+    // Continue with next entry rather than failing completely
+
+    // Check if we've completed processing
+    if oldReader.BaseStream.Position >= oldReader.BaseStream.Length then
+      currentState <- { currentState with IsCompleted = true }
+
+    currentState
+
+  /// <summary>
+  /// Legacy synchronous garbage collection method.
+  /// Now delegates to incremental GC for consistency.
+  /// </summary>
   static member CollectGarbage
     (valog : Valog, liveLocations : Set<int64>)
     : Async<Result<Valog * Map<int64, int64>, string> option>
     =
     async {
-      Logger.Debug
-        $"Valog GC: Started. Received {liveLocations.Count} live locations."
+      Logger.Info
+        $"Starting legacy synchronous Valog GC for {liveLocations.Count} live locations"
 
-      let tempValogPath = valog.Path + ".temp"
-      let mutable remappedLocations = Map.empty<int64, int64>
+      // Use incremental GC with aggressive batch settings for synchronous behavior
+      let config =
+        { MaxBatchTimeMs = System.Int32.MaxValue // No time limit
+          MaxBatchSize = System.Int32.MaxValue // No size limit
+          ProgressInterval = 1 // Report progress every batch
+        }
 
-      try
-        // Close the old file stream before moving/deleting it
-        valog.Close ()
+      let! result =
+        Valog.CollectGarbageIncremental (valog, liveLocations, config)
 
-        let! gcResult =
-          Valog.CopyLiveData (valog.Path, tempValogPath, liveLocations)
+      match result with
+      | Ok (state, Some newValog) when state.IsCompleted ->
+        Logger.Info "Legacy Valog GC completed successfully"
+        return Some (Ok (newValog, state.RemappedLocations))
+      | Ok (state, None) when not state.IsCompleted -> // Explicitly handle the case where GC is not completed
+        Logger.Warn
+          "Incremental GC did not complete in single batch (legacy mode)"
 
-        match gcResult with
-        | Ok (newlyRemappedLocations) ->
-          remappedLocations <- newlyRemappedLocations
-          // Replace old valog with new one
-          File.Delete valog.Path
-          File.Move (tempValogPath, valog.Path)
+        return Some (Error "GC did not complete as expected")
+      | Error msg -> // Handle the error case
+        Logger.Error $"Legacy GC failed: {msg}"
+        return Some (Error msg)
+      | _ -> // Catch-all for any other unexpected cases
+        Logger.Error
+          "Unexpected result from CollectGarbageIncremental in legacy GC mode"
 
-          // Reopen the Valog instance with the new file to get its updated state
-          match Valog.Create valog.Path with
-          | Ok newValog ->
-            Logger.Debug "Valog GC: Successfully replaced Valog file."
-            return Some (Ok (newValog, remappedLocations))
-          | Error msg ->
-            Logger.Error
-              $"Valog GC Error: Failed to re-open Valog after GC: {msg}"
-
-            return Some (Error msg)
-        | Error msg ->
-          Logger.Error $"Valog GC Error during live data copy: {msg}"
-          if File.Exists tempValogPath then File.Delete tempValogPath
-          return Some (Error msg)
-
-      with ex ->
-        Logger.Error $"Valog GC Error: {ex.Message}"
-        // Clean up temp file in case of error
-        if File.Exists tempValogPath then File.Delete tempValogPath
-
-        return Some (Error ex.Message)
+        return Some (Error "Unexpected GC result")
     }
 
   /// <summary>

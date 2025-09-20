@@ -22,6 +22,8 @@
     <Compile Include="Ocis.fs" />
     <Compile Include="OcisDBBenchmarks.fs" />
     <Compile Include="AdvancedBenchmarks.fs" />
+    <Compile Include="ErrorHandlingTests.fs" />
+    <Compile Include="ConcurrencyTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
