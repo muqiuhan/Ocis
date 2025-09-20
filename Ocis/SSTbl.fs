@@ -95,60 +95,113 @@ type SSTbl
   /// <param name="level">The compression level of the SSTable.</param>
   /// <returns>The path of the created SSTable file.</returns>
   static member Flush
-    (memtbl : Memtbl, path : string, timestamp : int64, level : int)
+    (memtbl : Memtbl | null, path : string, timestamp : int64, level : int)
     : string
     =
-    use fileStream =
-      new FileStream (path, FileMode.Create, FileAccess.Write, FileShare.None)
+    try
+      if obj.ReferenceEquals (memtbl, null) then
+        failwith "Memtbl cannot be null"
 
-    use writer = new BinaryWriter (fileStream)
+      if System.String.IsNullOrWhiteSpace path then
+        failwith "Path cannot be null or empty"
 
-    // Pre-allocate capacity based on memtbl size to reduce allocations
-    let memtblCount = memtbl.Count
-    let recordOffsets = Array.zeroCreate<int64> memtblCount
-    let mutable recordIndex = 0
-    let mutable currentLowKey : byte array = null
-    let mutable currentHighKey : byte array = null
+      if level < 0 then failwith $"Invalid level: {level}"
 
-    // 1. Write data block (Data Block)
-    memtbl
-    |> Seq.iter (fun (KeyValue (key, valueLocation)) ->
-      if currentLowKey = null then // Record the first key as LowKey
-        currentLowKey <- key
+      Logger.Debug
+        $"Flushing Memtbl with {memtbl.Count} entries to SSTable: {path}"
 
-      currentHighKey <- key // Update HighKey to the current key on each iteration
+      use fileStream =
+        new FileStream (path, FileMode.Create, FileAccess.Write, FileShare.None)
 
-      recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
-      recordIndex <- recordIndex + 1
-      Serialization.writeByteArray writer key
-      Serialization.writeValueLocation writer valueLocation)
+      use writer = new BinaryWriter (fileStream)
 
-    // Handle empty Memtbl cases, ensure LowKey and HighKey are not null
-    let actualLowKey = currentLowKey |> Option.ofObj |> Option.defaultValue [||]
+      // Pre-allocate capacity based on memtbl size to reduce allocations
+      let memtblCount = memtbl.Count
 
-    let actualHighKey =
-      currentHighKey |> Option.ofObj |> Option.defaultValue [||]
+      if memtblCount = 0 then Logger.Warn "Flushing empty Memtbl to SSTable"
 
-    // 2. Write index block (Index Block)
-    // The starting offset of the index block
-    let indexBlockStartOffset = fileStream.Position
+      let recordOffsets = Array.zeroCreate<int64> memtblCount
+      let mutable recordIndex = 0
+      let mutable currentLowKey : byte array = null
+      let mutable currentHighKey : byte array = null
 
-    for offset in recordOffsets do
-      writer.Write offset // Write the offset of each key-value pair
+      // 1. Write data block (Data Block)
+      memtbl
+      |> Seq.iter (fun (KeyValue (key, valueLocation)) ->
+        if currentLowKey = null then // Record the first key as LowKey
+          currentLowKey <- key
 
-    // 3. Write footer/metadata block (Footer/Metadata Block)
-    // The starting offset of the footer
-    let footerStartOffset = fileStream.Position
-    writer.Write timestamp
-    writer.Write level
-    Serialization.writeByteArray writer actualLowKey
-    Serialization.writeByteArray writer actualHighKey
-    writer.Write indexBlockStartOffset // Write the starting offset of the index block
-    writer.Write recordIndex // Write the number of entries in the index block
-    let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
-    writer.Write (footerSize |> int32) // Write the total size of the footer (int32)
+        currentHighKey <- key // Update HighKey to the current key on each iteration
 
-    path // Return the path of the generated SSTable file
+        if recordIndex >= memtblCount then
+          failwith
+            $"Record index {recordIndex} exceeded expected count {memtblCount}"
+
+        recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
+        recordIndex <- recordIndex + 1
+        Serialization.writeByteArray writer key
+        Serialization.writeValueLocation writer valueLocation)
+
+      // Handle empty Memtbl cases, ensure LowKey and HighKey are not null
+      let actualLowKey =
+        currentLowKey |> Option.ofObj |> Option.defaultValue [||]
+
+      let actualHighKey =
+        currentHighKey |> Option.ofObj |> Option.defaultValue [||]
+
+      // Validate that we wrote the expected number of records
+      if recordIndex <> memtblCount then
+        failwith
+          $"Record count mismatch: wrote {recordIndex} but expected {memtblCount}"
+
+      // 2. Write index block (Index Block)
+      // The starting offset of the index block
+      let indexBlockStartOffset = fileStream.Position
+
+      for offset in recordOffsets do
+        writer.Write offset // Write the offset of each key-value pair
+
+      // 3. Write footer/metadata block (Footer/Metadata Block)
+      // The starting offset of the footer
+      let footerStartOffset = fileStream.Position
+      writer.Write timestamp
+      writer.Write level
+      Serialization.writeByteArray writer actualLowKey
+      Serialization.writeByteArray writer actualHighKey
+      writer.Write indexBlockStartOffset // Write the starting offset of the index block
+      writer.Write recordIndex // Write the number of entries in the index block
+      let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
+      writer.Write (footerSize |> int32) // Write the total size of the footer (int32)
+
+      // Force flush to ensure data is written to disk
+      writer.Flush ()
+      fileStream.Flush (true) // Force flush to disk
+
+      Logger.Debug
+        $"Successfully flushed SSTable: {path} (records: {recordIndex}, size: {fileStream.Length} bytes)"
+
+      path // Return the path of the generated SSTable file
+
+    with
+    | :? System.IO.IOException as ioEx ->
+      Logger.Error $"I/O error during SSTable flush to '{path}': {ioEx.Message}"
+      reraise ()
+    | :? System.UnauthorizedAccessException ->
+      Logger.Error $"Access denied during SSTable flush to '{path}'"
+      reraise ()
+    | :? System.IO.DirectoryNotFoundException ->
+      Logger.Error $"Directory not found for SSTable flush: '{path}'"
+      reraise ()
+    | :? System.IO.PathTooLongException ->
+      Logger.Error $"Path too long for SSTable flush: '{path}'"
+      reraise ()
+    | ex ->
+      Logger.Error $"Exception type: {ex.GetType().FullName}"
+
+      Logger.Error
+        $"Unexpected error during SSTable flush to '{path}': {ex.Message}"
+
+      reraise ()
 
   /// <summary>
   /// Open an existing SSTable file and load its metadata and in-memory index.
@@ -160,61 +213,110 @@ type SSTbl
     let mutable reader : BinaryReader = null
 
     try
-      fileStream <-
-        new FileStream (path, FileMode.Open, FileAccess.Read, FileShare.Read)
-      // BinaryReader uses the leaveOpen: true parameter to ensure that the FileStream is not closed when the BinaryReader is disposed
-      reader <- new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
+      // Validate path before attempting to open
+      if System.String.IsNullOrWhiteSpace path then
+        Logger.Error "SSTable path is null or empty"
+        None
+      elif not (System.IO.File.Exists path) then
+        Logger.Debug $"SSTable file does not exist: {path}"
+        None
+      elif (new System.IO.FileInfo (path)).Length = 0L then
+        Logger.Error $"SSTable file is empty: {path}"
+        None
+      else
+        fileStream <-
+          new FileStream (path, FileMode.Open, FileAccess.Read, FileShare.Read)
+        // BinaryReader uses the leaveOpen: true parameter to ensure that the FileStream is not closed when the BinaryReader is disposed
+        reader <- new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
 
-      // 1. Read footer (Footer)
-      // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
-      fileStream.Seek (-4L, SeekOrigin.End) |> ignore
-      let footerSize = reader.ReadInt32 () // Read the size of the footer content (excluding footerSize itself)
+        // 1. Read footer (Footer)
+        // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
+        fileStream.Seek (-4L, SeekOrigin.End) |> ignore
+        let footerSize = reader.ReadInt32 () // Read the size of the footer content (excluding footerSize itself)
 
-      // Now, move the file pointer back to the starting position of the footer content (timestamp).
-      // The total amount of backtracking is footerSize + 4 bytes occupied by footerSize itself.
-      fileStream.Seek (-(footerSize + 4 |> int64), SeekOrigin.End) |> ignore
+        // Validate footer size
+        if footerSize <= 0 || footerSize > int fileStream.Length then
+          Logger.Error $"Invalid footer size {footerSize} in SSTable '{path}'"
+          if reader <> null then reader.Dispose ()
+          if fileStream <> null then fileStream.Dispose ()
+          None
+        else
+          // Now, move the file pointer back to the starting position of the footer content (timestamp).
+          // The total amount of backtracking is footerSize + 4 bytes occupied by footerSize itself.
+          fileStream.Seek (-(int64 footerSize + 4L), SeekOrigin.End) |> ignore
 
-      let timestamp = reader.ReadInt64 ()
-      let level = reader.ReadInt32 ()
-      let lowKey = Serialization.readByteArray reader
-      let highKey = Serialization.readByteArray reader
-      let indexBlockStartOffset = reader.ReadInt64 ()
-      let indexEntriesCount = reader.ReadInt32 ()
-      reader.ReadInt32 () |> ignore // Read and discard the footerSize field that we have already read
+          let timestamp = reader.ReadInt64 ()
+          let level = reader.ReadInt32 ()
+          let lowKey = Serialization.readByteArray reader
+          let highKey = Serialization.readByteArray reader
+          let indexBlockStartOffset = reader.ReadInt64 ()
+          let indexEntriesCount = reader.ReadInt32 ()
+          reader.ReadInt32 () |> ignore // Read and discard the footerSize field that we have already read
 
-      // 2. Read index block (Index Block)
-      fileStream.Seek (indexBlockStartOffset, SeekOrigin.Begin) |> ignore // Jump to the starting position of the index block
-      let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
+          // Validate index data
+          if indexEntriesCount < 0 then
+            Logger.Error
+              $"Invalid index entries count {indexEntriesCount} in SSTable '{path}'"
 
-      for i = 0 to indexEntriesCount - 1 do
-        recordOffsets[i] <- reader.ReadInt64 ()
+            if reader <> null then reader.Dispose ()
+            if fileStream <> null then fileStream.Dispose ()
+            None
+          elif
+            indexBlockStartOffset < 0L
+            || indexBlockStartOffset >= fileStream.Length
+          then
+            Logger.Error
+              $"Invalid index block offset {indexBlockStartOffset} in SSTable '{path}'"
 
-      Some (
-        new SSTbl (
-          path,
-          timestamp,
-          level,
-          fileStream,
-          reader,
-          recordOffsets,
-          lowKey,
-          highKey
-        )
-      )
+            if reader <> null then reader.Dispose ()
+            if fileStream <> null then fileStream.Dispose ()
+            None
+          else
+            // 2. Read index block (Index Block)
+            fileStream.Seek (indexBlockStartOffset, SeekOrigin.Begin) |> ignore // Jump to the starting position of the index block
+            let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
+
+            for i = 0 to indexEntriesCount - 1 do
+              recordOffsets[i] <- reader.ReadInt64 ()
+
+            Some (
+              new SSTbl (
+                path,
+                timestamp,
+                level,
+                fileStream,
+                reader,
+                recordOffsets,
+                lowKey,
+                highKey
+              )
+            )
     with
-    | :? FileNotFoundException ->
+    | :? System.IO.FileNotFoundException ->
+      Logger.Debug $"SSTable file not found: {path}"
       if reader <> null then reader.Dispose ()
-
-      if fileStream <> null then fileStream.Dispose () // Ensure the stream is closed when the file is not found
-
+      if fileStream <> null then fileStream.Dispose ()
+      None
+    | :? System.IO.IOException as ioEx ->
+      Logger.Error $"I/O error opening SSTable '{path}': {ioEx.Message}"
+      if reader <> null then reader.Dispose ()
+      if fileStream <> null then fileStream.Dispose ()
+      None
+    | :? System.UnauthorizedAccessException ->
+      Logger.Error $"Access denied opening SSTable '{path}'"
+      if reader <> null then reader.Dispose ()
+      if fileStream <> null then fileStream.Dispose ()
+      None
+    | :? System.IO.EndOfStreamException ->
+      Logger.Error $"Corrupted SSTable file (unexpected end of stream): {path}"
+      if reader <> null then reader.Dispose ()
+      if fileStream <> null then fileStream.Dispose ()
       None
     | ex ->
-      Logger.Error $"Error opening SSTable '{path}': {ex.Message}"
-
+      Logger.Error $"Exception type: {ex.GetType().FullName}"
+      Logger.Error $"Unexpected error opening SSTable '{path}': {ex.Message}"
       if reader <> null then reader.Dispose ()
-
-      if fileStream <> null then fileStream.Dispose () // Ensure the stream is closed when other exceptions occur
-
+      if fileStream <> null then fileStream.Dispose ()
       None
 
   /// <summary>

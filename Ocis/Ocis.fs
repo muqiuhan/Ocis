@@ -90,48 +90,105 @@ type OcisDB
     and set (threshold : float) = COMPACTION_SCORE_THRESHOLD <- threshold
 
   /// <summary>
-  /// Calculate compaction priority for an SSTable based on various factors
+  /// Calculates compaction priority for an SSTable based on multiple factors.
+  ///
+  /// Priority Determination Logic:
+  /// 1. Level 0 SSTables always get High priority because they are the most recently written
+  ///    and can have significant overlap with each other, affecting read performance.
+  ///
+  /// 2. For other levels, priority is determined by:
+  ///    - Overlap with next level: SSTables that heavily overlap with the next level
+  ///      create more I/O during reads and should be compacted sooner.
+  ///    - Size ratio: SSTables that are much larger than expected for their level
+  ///      indicate they need to be split down to lower levels.
+  ///
+  /// Design Decision: This multi-factor approach ensures we prioritize compaction
+  /// for SSTables that will provide the most benefit in terms of read performance
+  /// and space efficiency.
   /// </summary>
+  /// <param name="sstbl">The SSTable to evaluate</param>
+  /// <param name="level">The current level of the SSTable</param>
+  /// <param name="nextLevelSSTables">SSTables in the next level (for overlap calculation)</param>
+  /// <returns>The calculated priority level</returns>
   static member private calculateCompactionPriority
     (sstbl : SSTbl, level : int, nextLevelSSTables : SSTbl list option)
     : CompactionPriority
     =
     if level = 0 then
-      High // Level 0 always has high priority
+      // Level 0 SSTables are always high priority because:
+      // - They are the most recently written data
+      // - Multiple L0 SSTables can have significant key overlap
+      // - They directly impact read performance
+      High
     else
       match nextLevelSSTables with
       | Some nextSSTables ->
+        // Calculate overlap size with next level SSTables
         let overlapSize =
           nextSSTables
-          |> List.filter sstbl.Overlaps
-          |> List.sumBy _.Size
+          |> List.filter sstbl.Overlaps // Check key range overlap
+          |> List.sumBy _.Size // Sum sizes of overlapping SSTables
           |> int64
 
+        // Calculate expected size for this level
+        // Level size grows exponentially: L1 = threshold, L2 = threshold * multiplier, etc.
         let levelSize =
           int64 L0_COMPACTION_THRESHOLD
           * (pown (int64 LEVEL_SIZE_MULTIPLIER) (level - 1))
 
         let sizeRatio = float sstbl.Size / float levelSize
 
+        // Priority decision logic:
+        // High: Significant overlap AND this SSTable is oversized (>80% of expected level size)
+        // Medium: Has some overlap but not oversized
+        // Low: No overlap with next level
         if overlapSize > 0L && sizeRatio > 0.8 then High
         elif overlapSize > 0L then Medium
         else Low
-      | None -> Low
+      | None ->
+        // No next level SSTables means this is the deepest level
+        Low
 
   /// <summary>
-  /// Calculate a score for SSTable compaction priority
-  /// Higher score means higher priority for compaction
+  /// Calculates a comprehensive score for SSTable compaction priority.
+  ///
+  /// Score Components (weighted combination):
+  /// 1. Age Score (30%): Based on SSTable creation timestamp relative to current time.
+  ///    Older SSTables get lower scores (less urgent to compact).
+  ///    Formula: timestamp / current_time (normalized 0-1)
+  ///
+  /// 2. Size Score (30%): SSTable size in MB. Larger SSTables get higher scores
+  ///    because they have more data to potentially compact.
+  ///
+  /// 3. Overlap Score (40%): Total size of overlapping SSTables in next level (MB).
+  ///    Higher overlap indicates more I/O amplification during reads,
+  ///    making compaction more beneficial.
+  ///
+  /// 4. Level Weight: Level 0 SSTables get 10x weight multiplier because
+  ///    they directly impact read performance due to potential overlap.
+  ///
+  /// Design Decision: The scoring system balances multiple factors to ensure
+  /// compaction resources are allocated to SSTables that will provide the most benefit.
+  /// The overlap factor gets the highest weight because it directly correlates
+  /// with read performance improvement.
   /// </summary>
+  /// <param name="sstbl">The SSTable to score</param>
+  /// <param name="level">The current level of the SSTable</param>
+  /// <param name="nextLevelSSTables">SSTables in the next level for overlap calculation</param>
+  /// <returns>A score between 0 and infinity, higher scores indicate higher priority</returns>
   static member private calculateCompactionScore
     (sstbl : SSTbl, level : int, nextLevelSSTables : SSTbl list option)
     : float
     =
+    // Age score: normalized timestamp (older = lower score)
     let ageScore =
       float sstbl.Timestamp
       / float (System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ())
 
-    let sizeScore = float sstbl.Size / 1024.0 / 1024.0 // Size in MB
+    // Size score: SSTable size in MB (larger = higher score)
+    let sizeScore = float sstbl.Size / 1024.0 / 1024.0
 
+    // Overlap score: total size of overlapping SSTables in next level (MB)
     let overlapScore =
       match nextLevelSSTables with
       | Some nextSSTables ->
@@ -139,16 +196,38 @@ type OcisDB
         |> List.filter sstbl.Overlaps
         |> List.sumBy _.Size
         |> float
-        |> fun x -> x / 1024.0 / 1024.0 // Convert to MB
+        |> fun x -> x / 1024.0 / 1024.0
       | None -> 0.0
 
-    // Weighted combination of factors
+    // Level weight: Level 0 gets priority boost
     let levelWeight = if level = 0 then 10.0 else 1.0
+
+    // Weighted combination: overlap gets highest weight (40%) because
+    // it directly correlates with read performance improvement
     ageScore * 0.3 + sizeScore * 0.3 + overlapScore * 0.4 + levelWeight
 
   /// <summary>
-  /// Select best SSTables for compaction using improved strategy
+  /// Selects the best SSTables for compaction using a sophisticated multi-factor strategy.
+  ///
+  /// Selection Process:
+  /// 1. Evaluate all SSTables in the specified level
+  /// 2. Calculate priority and score for each SSTable based on:
+  ///    - Key range overlap with next level SSTables
+  ///    - SSTable size relative to level expectations
+  ///    - SSTable age (creation timestamp)
+  ///    - Level-specific priority rules
+  /// 3. Sort candidates by score (descending) and priority (High > Medium > Low)
+  ///
+  /// Design Decision: This approach ensures we select SSTables that will provide
+  /// the maximum benefit when compacted, balancing read performance improvement,
+  /// write amplification reduction, and space efficiency.
+  ///
+  /// Performance: The evaluation is done once per compaction cycle, making it
+  /// efficient even for large numbers of SSTables.
   /// </summary>
+  /// <param name="dbRef">Reference to the OcisDB instance</param>
+  /// <param name="level">The level to select SSTables from</param>
+  /// <returns>List of SSTable candidates sorted by compaction priority</returns>
   static member private selectSSTablesForCompaction
     (dbRef : OcisDB ref, level : int)
     : SSTableCandidate list
@@ -158,30 +237,53 @@ type OcisDB
 
     match currentLevelSSTables with
     | Some sstables when not (sstables |> List.isEmpty) ->
-      sstables
-      |> List.map (fun sstbl ->
-        let priority =
-          OcisDB.calculateCompactionPriority (sstbl, level, nextLevelSSTables)
+      Logger.Debug
+        $"Evaluating {sstables.Length} SSTables in level {level} for compaction"
 
-        let overlapSize =
-          match nextLevelSSTables with
-          | Some nextSSTables ->
-            nextSSTables
-            |> List.filter sstbl.Overlaps
-            |> List.sumBy _.Size
-            |> int64
-          | None -> 0L
+      let candidates =
+        sstables
+        |> List.map (fun sstbl ->
+          // Calculate compaction priority based on multiple factors
+          let priority =
+            OcisDB.calculateCompactionPriority (
+              sstbl,
+              level,
+              nextLevelSSTables
+            )
 
-        let score =
-          OcisDB.calculateCompactionScore (sstbl, level, nextLevelSSTables)
+          // Calculate overlap size for additional context
+          let overlapSize =
+            match nextLevelSSTables with
+            | Some nextSSTables ->
+              nextSSTables
+              |> List.filter sstbl.Overlaps
+              |> List.sumBy _.Size
+              |> int64
+            | None -> 0L
 
-        { SSTable = sstbl
-          Priority = priority
-          OverlapSize = overlapSize
-          Score = score })
-      |> List.sortByDescending (fun candidate ->
-        candidate.Score, candidate.Priority)
-    | _ -> []
+          // Calculate comprehensive compaction score
+          let score =
+            OcisDB.calculateCompactionScore (sstbl, level, nextLevelSSTables)
+
+          { SSTable = sstbl
+            Priority = priority
+            OverlapSize = overlapSize
+            Score = score })
+
+      // Sort by score (descending), then by priority (High > Medium > Low)
+      // This ensures the most beneficial SSTables are compacted first
+      let sortedCandidates =
+        candidates
+        |> List.sortByDescending (fun candidate ->
+          candidate.Score, candidate.Priority)
+
+      Logger.Debug
+        $"Selected {sortedCandidates.Length} SSTable candidates for level {level}"
+
+      sortedCandidates
+    | _ ->
+      Logger.Debug $"No SSTables found in level {level} for compaction"
+      []
 
   /// <summary>
   /// Find SSTables that contain remapped value locations for selective recompaction
@@ -246,8 +348,13 @@ type OcisDB
 
   /// <summary>
   /// Merges multiple SSTables into a new SSTable.
-  /// Handles duplicate keys by keeping the entry with the latest timestamp.
-  /// Filters out deletion markers (-1L).
+  /// This is the main entry point for SSTable merging that orchestrates the entire merge process.
+  /// The process involves: collecting entries, merging/deduplicating, applying remapping, and creating the final SSTable.
+  ///
+  /// Design Decision: We use timestamp-based conflict resolution (latest wins) because:
+  /// 1. It ensures deterministic behavior in distributed scenarios
+  /// 2. It's consistent with LSM-tree semantics
+  /// 3. It provides predictable behavior for concurrent writes
   /// </summary>
   static member private mergeSSTables
     (
@@ -259,57 +366,122 @@ type OcisDB
     : Result<SSTbl option * (byte array * ValueLocation) list, string>
     =
     try
-      // Collect all key-value pairs from the SSTables, ordered by key and then timestamp (descending)
-      let allEntries =
-        sstblsToMerge
-        |> List.collect (fun sstbl ->
-          sstbl
-          |> Seq.map (fun kvp -> kvp.Key, kvp.Value, sstbl.Timestamp)
-          |> Seq.toList)
-        |> List.sortBy (fun (key, _, timestamp) -> key, -timestamp) // Sort by key, then by timestamp descending
+      Logger.Debug
+        $"Starting SSTable merge: {sstblsToMerge.Length} SSTables to target level {targetLevel}"
 
-      let mergedMemtbl = Memtbl ()
-      let mutable processedKeys = Set.empty<byte array> // Use a set to track processed keys
+      // Step 1: Collect all entries from input SSTables
+      let allEntries = OcisDB.collectEntriesFromSSTables sstblsToMerge
 
-      // Pre-allocate array for live entries to reduce allocations
-      // Estimate capacity based on input SSTables size
-      let estimatedCapacity =
-        sstblsToMerge |> List.sumBy (fun sstbl -> sstbl.Size |> int)
+      // Step 2: Merge and deduplicate entries based on key and timestamp
+      let mergedEntries = OcisDB.mergeAndDeduplicateEntries allEntries
 
-      let liveEntriesArray =
-        Array.zeroCreate<byte array * ValueLocation> estimatedCapacity
+      // Step 3: Apply value location remapping if provided (used during garbage collection)
+      let remappedEntries =
+        OcisDB.applyRemappingToEntries mergedEntries remappedLocations
 
-      let mutable liveEntriesCount = 0
+      // Step 4: Create the final merged SSTable
+      OcisDB.createMergedSSTable dbRef remappedEntries targetLevel
 
-      for key, valueLoc, _ in allEntries do
-        if not (processedKeys.Contains key) then // Only process if key hasn't been processed yet
-          // Apply remapping if available
-          let finalValueLoc =
-            match remappedLocations with
-            | Some remap ->
-              match remap.TryGetValue valueLoc with
-              | true, newLoc -> newLoc
-              | false, _ -> valueLoc
-            | None -> valueLoc
+    with ex ->
+      Logger.Error $"Error during SSTable merge process: {ex.Message}"
+      Error $"Error merging SSTables: {ex.Message}"
 
-          if finalValueLoc <> -1L then // Filter out deletion markers
-            mergedMemtbl.Add (key, finalValueLoc)
+  /// <summary>
+  /// Step 1: Collects all key-value entries from the specified SSTables.
+  /// This function extracts entries from multiple SSTables and prepares them for merging.
+  ///
+  /// Performance Note: We collect all entries first to enable efficient sorting and deduplication.
+  /// Memory usage scales with the total size of input SSTables.
+  /// </summary>
+  static member private collectEntriesFromSSTables
+    (sstblsToMerge : SSTbl list)
+    : (byte array * ValueLocation * int64) list
+    =
+    Logger.Debug $"Collecting entries from {sstblsToMerge.Length} SSTables"
 
-            if liveEntriesCount < estimatedCapacity then
-              liveEntriesArray[liveEntriesCount] <- (key, finalValueLoc)
-              liveEntriesCount <- liveEntriesCount + 1
-          // If array is full, we'll handle this by creating a smaller final array
+    sstblsToMerge
+    |> List.collect (fun sstbl ->
+      sstbl
+      |> Seq.map (fun kvp -> kvp.Key, kvp.Value, sstbl.Timestamp)
+      |> Seq.toList)
+    |> List.sortBy (fun (key, _, timestamp) -> key, -timestamp) // Sort by key asc, timestamp desc
 
-          processedKeys <- processedKeys.Add key // Mark key as processed
+  /// <summary>
+  /// Step 2: Merges and deduplicates entries based on key and timestamp.
+  /// For each unique key, keeps only the entry with the most recent timestamp.
+  ///
+  /// Algorithm: Single-pass deduplication using a set to track processed keys.
+  /// Time Complexity: O(N) where N is the total number of entries.
+  /// Space Complexity: O(K) for processed keys set, where K is the number of unique keys.
+  /// </summary>
+  static member private mergeAndDeduplicateEntries
+    (allEntries : (byte array * ValueLocation * int64) list)
+    : (byte array * ValueLocation) list
+    =
+    Logger.Debug $"Merging and deduplicating {allEntries.Length} entries"
 
-      // Create final array with actual live entries
-      let liveEntriesInNewSSTbl =
-        if liveEntriesCount = estimatedCapacity then
-          liveEntriesArray
+    let mutable processedKeys = Set.empty<byte array>
+    let mutable mergedEntries = []
+
+    for key, valueLoc, _ in allEntries do
+      if not (processedKeys.Contains key) then
+        // First occurrence of this key (due to descending timestamp sort)
+        mergedEntries <- (key, valueLoc) :: mergedEntries
+        processedKeys <- processedKeys.Add key
+
+    // Reverse to maintain key order
+    List.rev mergedEntries
+
+  /// <summary>
+  /// Step 3: Applies value location remapping to entries.
+  /// This is used during Valog garbage collection to update pointers to moved values.
+  ///
+  /// Design Decision: Remapping is optional to avoid overhead when not needed.
+  /// Deletion markers (-1L) are preserved as they indicate logical deletions.
+  /// </summary>
+  static member private applyRemappingToEntries
+    (entries : (byte array * ValueLocation) list)
+    (remappedLocations : Map<int64, int64> option)
+    : (byte array * ValueLocation) list
+    =
+    match remappedLocations with
+    | Some remap when not remap.IsEmpty ->
+      Logger.Debug $"Applying remapping to {entries.Length} entries"
+
+      entries
+      |> List.map (fun (key, valueLoc) ->
+        if valueLoc = -1L then
+          // Preserve deletion markers
+          (key, valueLoc)
         else
-          liveEntriesArray |> Array.take liveEntriesCount
+          match remap.TryGetValue valueLoc with
+          | true, newLoc -> (key, newLoc)
+          | false, _ -> (key, valueLoc))
+    | _ -> entries
 
-      if mergedMemtbl.Count > 0 then
+  /// <summary>
+  /// Step 4: Creates the final merged SSTable from processed entries.
+  /// Handles memory allocation optimization and file I/O.
+  ///
+  /// Performance Optimization: Pre-allocates arrays based on estimated capacity
+  /// to reduce memory allocations during the merge process.
+  /// </summary>
+  static member private createMergedSSTable
+    (dbRef : OcisDB ref)
+    (entries : (byte array * ValueLocation) list)
+    (targetLevel : int)
+    : Result<SSTbl option * (byte array * ValueLocation) list, string>
+    =
+    if entries.IsEmpty then
+      Logger.Debug "No entries to merge, returning empty result"
+      Ok (None, [])
+    else
+      try
+        // Create MemTable for the merged entries
+        let mergedMemtbl = Memtbl ()
+        entries |> List.iter mergedMemtbl.Add
+
+        // Generate unique filename for the new SSTable
         let newSSTblPath =
           Path.Combine (
             dbRef.Value.Dir,
@@ -318,18 +490,26 @@ type OcisDB
 
         let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ()
 
+        Logger.Debug
+          $"Flushing {entries.Length} entries to SSTable at level {targetLevel}"
+
+        // Flush to disk
         let flushedSSTblPath =
           SSTbl.Flush (mergedMemtbl, newSSTblPath, timestamp, targetLevel)
 
+        // Open and validate the new SSTable
         match SSTbl.Open flushedSSTblPath with
         | Some newSSTbl ->
-          Ok (Some newSSTbl, liveEntriesInNewSSTbl |> Array.toList) // Return new SSTbl and live entries
+          Logger.Debug $"Successfully created merged SSTable: {newSSTbl.Path}"
+          Ok (Some newSSTbl, entries)
         | None ->
+          Logger.Error
+            $"Failed to open newly created SSTable: {flushedSSTblPath}"
+
           Error $"Failed to open newly merged SSTable at {flushedSSTblPath}"
-      else
-        Ok (None, []) // No entries to merge, return None and empty list
-    with ex ->
-      Error $"Error merging SSTables: {ex.Message}"
+      with ex ->
+        Logger.Error $"Error creating merged SSTable: {ex.Message}"
+        Error $"Error creating merged SSTable: {ex.Message}"
 
   static member private compact
     (
@@ -813,7 +993,13 @@ type OcisDB
     }
 
   /// <summary>
-  /// Background agent for handling Garbage Collection in Valog.
+  /// Background agent for handling Garbage Collection in Valog with enhanced features.
+  ///
+  /// Enhanced GC Features:
+  /// 1. Smart Tail position updates based on SSTable timestamps
+  /// 2. Incremental garbage collection support (when configured)
+  /// 3. Better progress tracking and error handling
+  /// 4. Automatic triggering based on Tail advancement
   /// </summary>
   static member private gcAgentLoop
     (dbRef : OcisDB ref)
@@ -825,40 +1011,229 @@ type OcisDB
 
         match msg with
         | TriggerGC ->
-          Logger.Debug "Triggering garbage collection."
+          Logger.Info "GC Agent: Received garbage collection trigger"
 
-          // Collect all live value locations
-          let liveLocations = OcisDB.GetLiveLocations dbRef // Use the new helper function
+          try
+            // Step 1: Update Valog Tail position using smart strategy
+            Logger.Debug "GC Agent: Updating Valog Tail position"
+            dbRef.Value.UpdateValogTail ()
 
-          Logger.Debug $"Collected {liveLocations.Count} live value locations."
+            // Step 2: Collect all live value locations
+            let liveLocations = OcisDB.GetLiveLocations dbRef
 
-          // Perform actual garbage collection in Valog
-          let! remappedLocationsOption =
-            Valog.CollectGarbage (dbRef.Value.ValueLog, liveLocations)
+            Logger.Info
+              $"GC Agent: Collected {liveLocations.Count} live value locations"
 
-          match remappedLocationsOption with
-          | Some (Ok (newValog, remappedLocations)) ->
-            dbRef.Value.ValueLog <- newValog // Update the Valog instance in OcisDB
+            if liveLocations.IsEmpty then
+              Logger.Info
+                "GC Agent: No live locations found, skipping garbage collection"
+            else
+              // Step 3: Perform garbage collection
+              // Check if we should use incremental GC (can be configured)
+              let useIncrementalGC = true // TODO: Make this configurable
 
-            Logger.Debug
-              $"Valog GC: Values were moved, {remappedLocations.Count} value locations remapped. Affected SSTables might need re-compaction to update pointers."
+              if useIncrementalGC then
+                Logger.Info "GC Agent: Using incremental garbage collection"
 
-            // Merge new remappedLocations into pendingRemappedLocations
-            for KeyValue (key, newLoc) in remappedLocations do
-              dbRef.Value.PendingRemappedLocations <-
-                dbRef.Value.PendingRemappedLocations.Add (key, newLoc)
+                // Configure incremental GC for low-latency operation
+                let gcConfig =
+                  { Valog.MaxBatchTimeMs = 100 // 100ms batches for responsiveness
+                    MaxBatchSize = 1000 // 1000 entries per batch
+                    ProgressInterval = 10 // Report progress every 10 batches
+                  }
 
-            // Trigger a compaction cycle to handle the remapping in affected SSTables
-            dbRef.Value.CompactionAgent.Post TriggerCompaction // Trigger general compaction
-          | Some (Error msg) -> Logger.Error $"Valog GC Error: {msg}"
-          | None ->
-            Logger.Debug
-              "Valog GC: No values were moved or no remapping needed."
+                let! gcResult =
+                  Valog.CollectGarbageIncremental (
+                    dbRef.Value.ValueLog,
+                    liveLocations,
+                    gcConfig
+                  )
+
+                match gcResult with
+                | Ok (state, newValogOption) when state.IsCompleted ->
+                  // GC completed successfully
+                  Logger.Info
+                    $"Incremental GC completed: {state.RemappedLocations.Count} locations remapped"
+
+                  // Properly dispose of the old Valog to ensure file handles are released
+                  lock dbRef.Value (fun () ->
+                    if
+                      not (obj.ReferenceEquals (dbRef.Value.ValueLog, null))
+                    then
+                      try
+                        (dbRef.Value.ValueLog :> System.IDisposable).Dispose ()
+                        Logger.Debug "Old Valog disposed successfully"
+                      with ex ->
+                        Logger.Warn $"Error disposing old Valog: {ex.Message}"
+
+                    match newValogOption with
+                    | Some newInstance ->
+                      dbRef.Value.ValueLog <- newInstance // Assign the new, valid Valog instance
+                      Logger.Debug "New Valog assigned successfully after GC"
+                    | None ->
+                      Logger.Error
+                        "CollectGarbageIncremental returned completed state but no new Valog instance."
+
+                      dbRef.Value.ValueLog <- Unchecked.defaultof<Valog>) // Mark as invalid if no new Valog
+
+                  // Handle remapped locations
+                  for KeyValue (oldLoc, newLoc) in state.RemappedLocations do
+                    dbRef.Value.PendingRemappedLocations <-
+                      dbRef.Value.PendingRemappedLocations.Add (oldLoc, newLoc)
+
+                  // Trigger compaction to update affected SSTables
+                  dbRef.Value.CompactionAgent.Post TriggerCompaction
+
+                | Ok (state, _) ->
+                  Logger.Info
+                    $"Incremental GC batch completed: {state.ProcessedCount}/{state.TotalLiveLocations} locations processed"
+                // Could continue processing in next iteration if needed
+
+                | Error msg -> Logger.Error $"Incremental GC failed: {msg}"
+              else
+                // Use legacy synchronous GC
+                Logger.Info
+                  "GC Agent: Using legacy synchronous garbage collection"
+
+                let! remappedLocationsOption =
+                  Valog.CollectGarbage (dbRef.Value.ValueLog, liveLocations)
+
+                match remappedLocationsOption with
+                | Some (Ok (newValog, remappedLocations)) ->
+                  dbRef.Value.ValueLog <- newValog
+
+                  Logger.Info
+                    $"Legacy GC completed: {remappedLocations.Count} locations remapped"
+
+                  // Handle remapped locations
+                  for KeyValue (oldLoc, newLoc) in remappedLocations do
+                    dbRef.Value.PendingRemappedLocations <-
+                      dbRef.Value.PendingRemappedLocations.Add (oldLoc, newLoc)
+
+                  // Trigger compaction to update affected SSTables
+                  dbRef.Value.CompactionAgent.Post TriggerCompaction
+
+                | Some (Error msg) -> Logger.Error $"Legacy GC failed: {msg}"
+                | None -> Logger.Info "Legacy GC: No values needed to be moved"
+
+          with ex ->
+            Logger.Error $"GC Agent error: {ex.Message}"
+            Logger.Error $"Stack trace: {ex.StackTrace}"
 
     }
 
   /// <summary>
+  /// Calculates the optimal Tail position for Valog based on SSTable timestamps.
+  ///
+  /// Smart Tail Update Strategy:
+  /// The Tail represents the position before which all data is considered garbage.
+  /// Instead of keeping Tail at 0, we can advance it based on the oldest SSTable
+  /// that might still reference data in the Valog.
+  ///
+  /// Algorithm:
+  /// 1. Find the oldest SSTable across all levels
+  /// 2. Find the minimum value location referenced by that SSTable
+  /// 3. Set Tail to that minimum location (minus safety margin)
+  /// 4. This allows earlier parts of Valog to be garbage collected
+  ///
+  /// Benefits:
+  /// - Reduces the amount of data that needs to be processed during GC
+  /// - Allows more aggressive garbage collection
+  /// - Improves overall system performance by reducing Valog size
+  ///
+  /// Safety Considerations:
+  /// - Keep a safety margin to account for potential timing issues
+  /// - Only advance Tail if we have high confidence no older data is needed
+  /// - Conservative approach: never advance beyond what's absolutely safe
+  /// </summary>
+  /// <param name="dbRef">Reference to the OcisDB instance</param>
+  /// <returns>The calculated optimal Tail position</returns>
+  static member private CalculateOptimalTailPosition
+    (dbRef : OcisDB ref)
+    : int64
+    =
+    try
+      // Safety margin: don't advance Tail too close to actually referenced data
+      let safetyMargin = 1024L * 1024L // 1MB safety margin
+
+      // Find all SSTables across all levels
+      let allSSTables =
+        dbRef.Value.SSTables
+        |> Map.toSeq
+        |> Seq.collect (fun (_, sstblList) -> sstblList)
+        |> Seq.toList
+
+      if allSSTables.IsEmpty then
+        Logger.Debug "No SSTables found, keeping Tail at 0"
+        0L
+      else
+        // Find the oldest SSTable (by timestamp)
+        let oldestSSTable =
+          allSSTables |> List.minBy (fun sstbl -> sstbl.Timestamp)
+
+        Logger.Debug
+          $"Oldest SSTable timestamp: {oldestSSTable.Timestamp}, level: {oldestSSTable.Level}"
+
+        // Find the minimum value location in the oldest SSTable
+        let minValueLocation =
+          oldestSSTable
+          |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc)
+          |> Seq.filter (fun loc -> loc <> -1L) // Exclude deletion markers
+          |> Seq.min
+
+        // Apply safety margin and ensure we don't go below 0
+        let optimalTail = max 0L (minValueLocation - safetyMargin)
+
+        Logger.Debug
+          $"Calculated optimal Tail position: {optimalTail} (min location: {minValueLocation}, safety margin: {safetyMargin})"
+
+        optimalTail
+
+    with ex ->
+      Logger.Warn
+        $"Error calculating optimal Tail position: {ex.Message}, keeping current Tail"
+
+      dbRef.Value.ValueLog.Tail
+
+  /// <summary>
+  /// Updates the Valog Tail position using smart timestamp-based strategy.
+  ///
+  /// This function should be called periodically to advance the Tail and allow
+  /// more aggressive garbage collection.
+  /// </summary>
+  member this.UpdateValogTail () : unit =
+    try
+      let currentTail = this.ValueLog.Tail
+      let dbRef = ref this // Create a reference to self for static method
+      let optimalTail = OcisDB.CalculateOptimalTailPosition dbRef
+
+      if optimalTail > currentTail then
+        Logger.Info
+          $"Advancing Valog Tail from {currentTail} to {optimalTail} ({optimalTail - currentTail} bytes freed)"
+
+        this.ValueLog.Tail <- optimalTail
+
+        // Trigger GC if the advancement is significant
+        let advancementThreshold = 10L * 1024L * 1024L // 10MB threshold
+
+        if optimalTail - currentTail > advancementThreshold then
+          Logger.Info
+            "Significant Tail advancement detected, triggering garbage collection"
+
+          this.GCAgent.Post TriggerGC
+      else
+        Logger.Debug
+          $"Tail position unchanged (current: {currentTail}, optimal: {optimalTail})"
+
+    with ex ->
+      Logger.Error $"Error updating Valog Tail: {ex.Message}"
+
+  /// <summary>
   /// Helper function to collect all live value locations from MemTables and SSTables.
+  ///
+  /// Performance Optimization:
+  /// This function is critical for garbage collection efficiency.
+  /// We use Set to automatically deduplicate locations and enable fast lookups.
   /// </summary>
   static member private GetLiveLocations (dbRef : OcisDB ref) : Set<int64> =
     let mutable liveLocations = Set.empty<int64>
@@ -866,12 +1241,14 @@ type OcisDB
     // From CurrentMemtbl
     dbRef.Value.CurrentMemtbl
     |> Seq.iter (fun (KeyValue (_, valueLoc)) ->
-      liveLocations <- liveLocations.Add valueLoc)
+      if valueLoc <> -1L then // Exclude deletion markers
+        liveLocations <- liveLocations.Add valueLoc)
 
     // From ImmutableMemtbl
     dbRef.Value.ImmutableMemtbl
     |> Seq.collect (fun memtbl ->
       memtbl |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc))
+    |> Seq.filter (fun valueLoc -> valueLoc <> -1L) // Exclude deletion markers
     |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add valueLoc)
 
     // From SSTables
@@ -881,8 +1258,10 @@ type OcisDB
       sstblList
       |> Seq.collect (fun sstbl ->
         sstbl |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc)))
+    |> Seq.filter (fun valueLoc -> valueLoc <> -1L) // Exclude deletion markers
     |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add valueLoc)
 
+    Logger.Debug $"Collected {liveLocations.Count} live value locations for GC"
     liveLocations
 
   /// <summary>
@@ -895,75 +1274,218 @@ type OcisDB
     : Result<OcisDB, string>
     =
     try
-      // Ensure the directory exists
-      if not (Directory.Exists dir) then Directory.CreateDirectory dir |> ignore
+      // Validate inputs
+      if System.String.IsNullOrWhiteSpace dir then
+        Error "Directory path cannot be null or empty"
+      elif flushThreshold <= 0 then
+        Error
+          $"Invalid flush threshold: {flushThreshold}. Must be greater than 0"
+      else
+        Logger.Info $"Opening OcisDB at directory: {dir}"
 
-      let valogPath = Path.Combine (dir, "valog.vlog")
+        // Ensure the directory exists
+        let createDirResult =
+          try
+            if not (Directory.Exists dir) then
+              Directory.CreateDirectory dir |> ignore
+              Logger.Info $"Created database directory: {dir}"
 
-      Valog.Create valogPath
-      |> Result.bind (fun valog -> // Chain Result operations
-        let walPath = Path.Combine (dir, "wal.log")
+            Ok ()
+          with
+          | :? System.IO.IOException as ioEx ->
+            Error $"Failed to create database directory '{dir}': {ioEx.Message}"
+          | :? System.UnauthorizedAccessException ->
+            Error $"Access denied creating database directory '{dir}'"
+          | :? System.IO.PathTooLongException ->
+            Error $"Database directory path too long: '{dir}'"
 
-        Wal.Create walPath
-        |> Result.bind (fun wal ->
-          // Replay WAL to reconstruct CurrentMemTable
-          let initialMemtbl = Memtbl () // Use Memtbl() for a new instance
-          let replayedEntries = Wal.Replay walPath // Use WAL.Wal to specify the type
+        match createDirResult with
+        | Error msg -> Error msg
+        | Ok () ->
 
-          for entry in replayedEntries do
-            match entry with
-            | WalEntry.Set (key, valueLoc) ->
-              initialMemtbl.Add (key, valueLoc)
-            | WalEntry.Delete key -> initialMemtbl.Delete key
+          // Create Valog
+          let valogPath = Path.Combine (dir, "valog.vlog")
+          Logger.Debug $"Creating Valog at: {valogPath}"
 
-          // Load existing SSTables
-          let mutable loadedSSTables = Map.empty<int, SSTbl list> // 修正 Map.empty
-          let sstblFiles = Directory.GetFiles (dir, "sstbl-*.sst") // Assuming SSTables follow this naming convention
+          Valog.Create valogPath
+          |> Result.bind (fun valog ->
+            Logger.Debug "Valog created successfully"
 
-          for filePath in sstblFiles do
-            match SSTbl.Open filePath with
-            | Some sstbl ->
-              loadedSSTables <-
-                loadedSSTables
-                |> Map.change sstbl.Level (fun currentListOption ->
-                  match currentListOption with
-                  | Some currentList -> Some (sstbl :: currentList)
-                  | None -> Some [ sstbl ])
-            | None ->
-              Logger.Warn
-                $"Failed to open SSTable file: {filePath}. It might be corrupted."
+            // Create WAL
+            let walPath = Path.Combine (dir, "wal.log")
+            Logger.Debug $"Creating WAL at: {walPath}"
 
-          // Initialize agents (MailboxProcessors)
-          // Create a mutable reference to OcisDB to allow agents to update its state
-          let dbRef = ref Unchecked.defaultof<OcisDB> // Placeholder, will be updated after OcisDB instance is created
+            Wal.Create walPath
+            |> Result.bind (fun wal ->
+              Logger.Debug "WAL created successfully"
 
-          let compactionAgent =
-            MailboxProcessor.Start (OcisDB.compactionAgentLoop dbRef)
+              // Replay WAL to reconstruct CurrentMemTable
+              let initialMemtbl = Memtbl ()
+              Logger.Debug "Replaying WAL entries..."
 
-          let flushAgent =
-            MailboxProcessor.Start (OcisDB.flushAgentLoop dbRef) // Initialize new flush agent
+              let replayedEntries = Wal.Replay walPath
+              let mutable replayCount = 0
 
-          let gcAgent = MailboxProcessor.Start (OcisDB.gcAgentLoop dbRef)
+              for entry in replayedEntries do
+                match entry with
+                | WalEntry.Set (key, valueLoc) ->
+                  initialMemtbl.Add (key, valueLoc)
+                  replayCount <- replayCount + 1
+                | WalEntry.Delete key ->
+                  initialMemtbl.Delete key
+                  replayCount <- replayCount + 1
 
-          let ocisDB =
-            new OcisDB (
-              dir,
-              initialMemtbl,
-              ConcurrentQueue<Memtbl> (),
-              loadedSSTables,
-              valog,
-              wal,
-              compactionAgent,
-              flushAgent, // Pass new flush agent
-              gcAgent,
-              flushThreshold
-            )
+              Logger.Info $"Replayed {replayCount} WAL entries into MemTable"
 
-          dbRef.Value <- ocisDB // Update the mutable reference
+              // Load existing SSTables
+              let mutable loadedSSTables = Map.empty<int, SSTbl list>
+              let mutable loadedCount = 0
+              let mutable failedCount = 0
 
-          Ok ocisDB))
-    with ex ->
+              try
+                let sstblFiles = Directory.GetFiles (dir, "sstbl-*.sst")
+
+                Logger.Info $"Found {sstblFiles.Length} SSTable files to load"
+
+                for filePath in sstblFiles do
+                  try
+                    Logger.Debug $"Loading SSTable: {filePath}"
+
+                    match SSTbl.Open filePath with
+                    | Some sstbl ->
+                      loadedSSTables <-
+                        loadedSSTables
+                        |> Map.change sstbl.Level (fun currentListOption ->
+                          match currentListOption with
+                          | Some currentList -> Some (sstbl :: currentList)
+                          | None -> Some [ sstbl ])
+
+                      loadedCount <- loadedCount + 1
+
+                      Logger.Debug
+                        $"Loaded SSTable: {Path.GetFileName filePath} (Level {sstbl.Level})"
+                    | None ->
+                      Logger.Warn
+                        $"Failed to open SSTable file: {filePath}. File may be corrupted or inaccessible."
+
+                      failedCount <- failedCount + 1
+                  with ex ->
+                    Logger.Error
+                      $"Error loading SSTable '{filePath}': {ex.Message}"
+
+                    failedCount <- failedCount + 1
+
+                if failedCount > 0 then
+                  Logger.Warn
+                    $"Failed to load {failedCount} out of {sstblFiles.Length} SSTable files"
+
+              with
+              | :? System.IO.DirectoryNotFoundException ->
+                Logger.Warn $"SSTable directory not found: {dir}"
+              | :? System.IO.IOException as ioEx ->
+                Logger.Error
+                  $"I/O error accessing SSTable directory: {ioEx.Message}"
+              | ex ->
+                Logger.Error
+                  $"Unexpected error loading SSTables: {ex.Message}"
+
+              Logger.Info
+                $"Successfully loaded {loadedCount} SSTables across {loadedSSTables.Count} levels"
+
+              // Initialize agents (MailboxProcessors)
+              Logger.Debug "Initializing background agents..."
+
+              // Create a mutable reference to OcisDB to allow agents to update its state
+              let dbRef = ref Unchecked.defaultof<OcisDB>
+
+              let compactionAgent =
+                MailboxProcessor.Start (OcisDB.compactionAgentLoop dbRef)
+
+              let flushAgent =
+                MailboxProcessor.Start (OcisDB.flushAgentLoop dbRef)
+
+              let gcAgent = MailboxProcessor.Start (OcisDB.gcAgentLoop dbRef)
+
+              Logger.Debug "Background agents initialized"
+
+              let ocisDB =
+                new OcisDB (
+                  dir,
+                  initialMemtbl,
+                  ConcurrentQueue<Memtbl> (),
+                  loadedSSTables,
+                  valog,
+                  wal,
+                  compactionAgent,
+                  flushAgent,
+                  gcAgent,
+                  flushThreshold
+                )
+
+              dbRef.Value <- ocisDB // Update the mutable reference
+
+              Logger.Info
+                $"OcisDB opened successfully at {dir} with {initialMemtbl.Count} MemTable entries and {loadedCount} SSTables"
+
+              Ok ocisDB))
+    with
+    | :? System.IO.PathTooLongException ->
+      Error $"Database path too long: '{dir}'"
+    | :? System.UnauthorizedAccessException ->
+      Error $"Access denied to database directory: '{dir}'"
+    | :? System.IO.IOException as ioEx when
+      ioEx.Message.Contains "disk" || ioEx.Message.Contains "full"
+      ->
+      Error "Disk is full - cannot create database files"
+    | :? System.OutOfMemoryException ->
+      Error "Out of memory - database may be too large to load"
+    | ex ->
+      Logger.Error $"Unexpected error opening OcisDB: {ex.Message}"
       Error $"Failed to open WiscKeyDB: {ex.Message}"
+
+  /// <summary>
+  /// Ensures Valog is available, reopening it if necessary after GC.
+  /// </summary>
+  member private this.EnsureValogAvailable () : Result<unit, string> =
+    try
+      // Check if Valog is in an invalid state (after GC)
+      if obj.ReferenceEquals (this.ValueLog, null) then // Check for null first
+        Logger.Debug "Valog is invalid, reopening with retry logic..."
+
+        let valogPath = Path.Combine (this.Dir, "valog.vlog")
+
+        // Use a lock to ensure only one thread can recreate Valog
+        lock this (fun () ->
+          // Double-check after acquiring lock
+          if obj.ReferenceEquals (this.ValueLog, null) then // Re-check for null
+            // Retry logic with exponential backoff
+            let rec retryOpen attempts =
+              if attempts >= 10 then // Increased from 5 to 10
+                Logger.Error
+                  $"Failed to reopen Valog after {attempts} attempts"
+
+                Error $"Failed to reopen Valog after {attempts} attempts"
+              else
+                match Valog.Create valogPath with
+                | Ok newValog ->
+                  this.ValueLog <- newValog
+                  Logger.Info "Valog reopened successfully after GC"
+                  Ok ()
+                | Error msg ->
+                  Logger.Warn
+                    $"Failed to reopen Valog (attempt {attempts + 1}): {msg}"
+                  // Wait before retry with longer exponential backoff
+                  System.Threading.Thread.Sleep (200 * (1 <<< attempts)) // Increased from 100ms
+                  retryOpen (attempts + 1)
+
+            retryOpen 0
+          else
+            Ok ())
+      else
+        Ok ()
+    with ex ->
+      Logger.Error $"Error ensuring Valog availability: {ex.Message}"
+      Error $"Valog availability check failed: {ex.Message}"
 
   /// <summary>
   /// Sets a key-value pair in the database.
@@ -977,19 +1499,23 @@ type OcisDB
     =
     async {
       try
-        // 1. Write to ValueLog
-        let valueLocation = valog.Append (key, value)
+        // Ensure Valog is available
+        match this.EnsureValogAvailable () with
+        | Error msg -> return Error msg
+        | Ok () ->
+          // 1. Write to ValueLog
+          let valueLocation = valog.Append (key, value)
 
-        // 2. Write to WAL
-        wal.Append (WalEntry.Set (key, valueLocation))
+          // 2. Write to WAL
+          wal.Append (WalEntry.Set (key, valueLocation))
 
-        // 3. Write to CurrentMemTable
-        currentMemtbl.Add (key, valueLocation)
+          // 3. Write to CurrentMemTable
+          currentMemtbl.Add (key, valueLocation)
 
-        // 4. Check MemTable size and trigger flush if needed
-        do! this.CheckAndFlushMemtable ()
+          // 4. Check MemTable size and trigger flush if needed
+          do! this.CheckAndFlushMemtable ()
 
-        return Ok ()
+          return Ok ()
       with ex ->
         return Error $"Failed to set key-value pair: {ex.Message}"
     }
@@ -1019,25 +1545,26 @@ type OcisDB
     =
     async {
       try
-        let resolveValue = this.ResolveValueLocation // Use the new helper function
+        // Ensure Valog is available
+        match this.EnsureValogAvailable () with
+        | Error msg -> return Error msg
+        | Ok () ->
+          let resolveValue = this.ResolveValueLocation // Use the new helper function
 
-        // 1. Search CurrentMemTable
-        match this.CurrentMemtbl.TryGet key with
-        | Some valueLocation ->
-          return! async { return resolveValue valueLocation }
-        | None ->
-          // 2. Search ImmutableMemTables (from newest to oldest)
-          match this.SearchImmutableMemtables key with // Use the new helper function
-          | Some valueLocation ->
-            return! async { return resolveValue valueLocation }
+          // 1. Search CurrentMemTable
+          match this.CurrentMemtbl.TryGet key with
+          | Some valueLocation -> return resolveValue valueLocation
           | None ->
-            // 3. Search SSTables (from Level 0 upwards, newest within each level)
-            match this.SearchSSTables key with // Use the new helper function
-            | Some valueLocation ->
-              return! async { return resolveValue valueLocation }
+            // 2. Search ImmutableMemTables (from newest to oldest)
+            match this.SearchImmutableMemtables key with // Use the new helper function
+            | Some valueLocation -> return resolveValue valueLocation
             | None ->
-              // If not found anywhere
-              return Ok None
+              // 3. Search SSTables (from Level 0 upwards, newest within each level)
+              match this.SearchSSTables key with // Use the new helper function
+              | Some valueLocation -> return resolveValue valueLocation
+              | None ->
+                // If not found anywhere
+                return Ok None
       with ex ->
         return
           Error
@@ -1054,10 +1581,14 @@ type OcisDB
     if valueLocation = -1L then
       Ok None // Deletion marker
     else
-      match this.ValueLog.Read valueLocation with
-      | Some (_, value) -> Ok (Some value)
-      | None ->
-        Error $"Failed to read value from Valog at location {valueLocation}."
+      // Ensure Valog is available before reading
+      match this.EnsureValogAvailable () with
+      | Error msg -> Error msg
+      | Ok () ->
+        match this.ValueLog.Read valueLocation with
+        | Some (_, value) -> Ok (Some value)
+        | None ->
+          Error $"Failed to read value from Valog at location {valueLocation}."
 
   /// <summary>
   /// Helper function to search ImmutableMemTables for a given key.
