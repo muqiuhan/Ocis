@@ -1,74 +1,66 @@
 
 BenchmarkDotNet v0.15.2, Linux Pop!_OS 22.04 LTS
 AMD Ryzen 7 6800H with Radeon Graphics 4.79GHz, 1 CPU, 16 logical and 8 physical cores
-.NET SDK 9.0.203
-  [Host]   : .NET 9.0.4 (9.0.425.16305), X64 AOT AVX2 DEBUG
-  ShortRun : .NET 9.0.4 (9.0.425.16305), X64 RyuJIT AVX2
+.NET SDK 10.0.100-preview.7.25380.108
+  [Host]   : .NET 10.0.0 (10.0.25.38108), X64 AOT AVX2 DEBUG
+  ShortRun : .NET 10.0.0 (10.0.25.38108), X64 RyuJIT AVX2
 
 Job=ShortRun  InvocationCount=1  IterationCount=3  
 LaunchCount=1  UnrollFactor=1  WarmupCount=3  
 
- | Method                   | DataSize   | HotDataRatio |           Mean |         Error |       StdDev |            Gen0 |           Gen1 |          Gen2 |     Allocated |
- | ------------------------ | ---------- | ------------ | -------------: | ------------: | -----------: | --------------: | -------------: | ------------: | ------------: |
- | **LayeredWrite**         | **10000**  | **0.2**      |   **359.8 ms** | **297.27 ms** | **16.29 ms** |   **8000.0000** |  **2000.0000** |         **-** |  **70.63 MB** |
- | CrossSSTableRead         | 10000      | 0.2          |       371.9 ms |      55.45 ms |      3.04 ms |       9000.0000 |      3000.0000 |             - |      76.95 MB |
- | RangeQueryAcrossSSTables | 10000      | 0.2          |       352.7 ms |      14.76 ms |      0.81 ms |       8000.0000 |      1000.0000 |             - |      69.83 MB |
- | RealisticWorkload        | 10000      | 0.2          |             NA |            NA |           NA |              NA |             NA |            NA |            NA |
- | PostCompactionRead       | 10000      | 0.2          |     1,358.3 ms |      24.30 ms |      1.33 ms |       9000.0000 |      5000.0000 |             - |      75.17 MB |
- | MemoryEfficiencyTest     | 10000      | 0.2          |       376.9 ms |      53.88 ms |      2.95 ms |      16000.0000 |     11000.0000 |     8000.0000 |      74.84 MB |
- | **LayeredWrite**         | **10000**  | **0.5**      |   **344.5 ms** |  **19.11 ms** |  **1.05 ms** |   **7000.0000** |  **4000.0000** |         **-** |  **63.49 MB** |
- | CrossSSTableRead         | 10000      | 0.5          |       355.7 ms |      35.26 ms |      1.93 ms |       9000.0000 |      5000.0000 |             - |      72.18 MB |
- | RangeQueryAcrossSSTables | 10000      | 0.5          |       344.0 ms |      25.86 ms |      1.42 ms |       7000.0000 |      4000.0000 |             - |      63.53 MB |
- | RealisticWorkload        | 10000      | 0.5          |       356.1 ms |      85.59 ms |      4.69 ms |       8000.0000 |      5000.0000 |             - |      65.63 MB |
- | PostCompactionRead       | 10000      | 0.5          |     1,357.0 ms |      27.11 ms |      1.49 ms |       8000.0000 |      5000.0000 |             - |      65.49 MB |
- | MemoryEfficiencyTest     | 10000      | 0.5          |       367.8 ms |      50.71 ms |      2.78 ms |      15000.0000 |     12000.0000 |     8000.0000 |       69.3 MB |
- | **LayeredWrite**         | **10000**  | **0.8**      |   **349.8 ms** |  **22.25 ms** |  **1.22 ms** |   **7000.0000** |  **3000.0000** |         **-** |  **58.53 MB** |
- | CrossSSTableRead         | 10000      | 0.8          |       361.1 ms |      64.15 ms |      3.52 ms |       8000.0000 |      4000.0000 |             - |      70.53 MB |
- | RangeQueryAcrossSSTables | 10000      | 0.8          |       352.4 ms |       6.21 ms |      0.34 ms |       7000.0000 |      3000.0000 |             - |      58.55 MB |
- | RealisticWorkload        | 10000      | 0.8          |       353.2 ms |      21.27 ms |      1.17 ms |       7000.0000 |      3000.0000 |             - |      60.68 MB |
- | PostCompactionRead       | 10000      | 0.8          |     1,355.9 ms |      21.48 ms |      1.18 ms |       7000.0000 |      3000.0000 |             - |      60.53 MB |
- | MemoryEfficiencyTest     | 10000      | 0.8          |       368.0 ms |      27.61 ms |      1.51 ms |      15000.0000 |     11000.0000 |     8000.0000 |      64.34 MB |
- | **LayeredWrite**         | **50000**  | **0.2**      |   **730.9 ms** | **420.77 ms** | **23.06 ms** |  **54000.0000** | **21000.0000** | **3000.0000** | **433.02 MB** |
- | CrossSSTableRead         | 50000      | 0.2          |       767.1 ms |     669.05 ms |     36.67 ms |      60000.0000 |     23000.0000 |     3000.0000 |     472.06 MB |
- | RangeQueryAcrossSSTables | 50000      | 0.2          |       691.7 ms |     276.32 ms |     15.15 ms |      55000.0000 |     20000.0000 |     2000.0000 |      444.9 MB |
- | RealisticWorkload        | 50000      | 0.2          |       700.4 ms |     226.27 ms |     12.40 ms |      55000.0000 |     21000.0000 |     3000.0000 |     439.93 MB |
- | PostCompactionRead       | 50000      | 0.2          |     1,598.5 ms |      78.50 ms |      4.30 ms |      57000.0000 |     24000.0000 |     4000.0000 |     446.96 MB |
- | MemoryEfficiencyTest     | 50000      | 0.2          |       829.6 ms |   1,051.54 ms |     57.64 ms |      63000.0000 |     31000.0000 |    10000.0000 |     454.44 MB |
- | **LayeredWrite**         | **50000**  | **0.5**      |   **721.0 ms** | **129.78 ms** |  **7.11 ms** |  **58000.0000** | **22000.0000** | **3000.0000** | **457.11 MB** |
- | CrossSSTableRead         | 50000      | 0.5          |       847.6 ms |   1,129.75 ms |     61.93 ms |      62000.0000 |     23000.0000 |     4000.0000 |     492.02 MB |
- | RangeQueryAcrossSSTables | 50000      | 0.5          |       723.0 ms |     384.58 ms |     21.08 ms |      58000.0000 |     23000.0000 |     4000.0000 |      450.9 MB |
- | RealisticWorkload        | 50000      | 0.5          |       729.3 ms |     210.85 ms |     11.56 ms |      55000.0000 |     20000.0000 |     2000.0000 |     441.29 MB |
- | PostCompactionRead       | 50000      | 0.5          |     1,621.5 ms |      55.76 ms |      3.06 ms |      57000.0000 |     24000.0000 |     3000.0000 |     450.45 MB |
- | MemoryEfficiencyTest     | 50000      | 0.5          |       828.1 ms |     254.19 ms |     13.93 ms |      65000.0000 |     31000.0000 |    11000.0000 |     457.25 MB |
- | **LayeredWrite**         | **50000**  | **0.8**      |   **722.7 ms** | **290.59 ms** | **15.93 ms** |  **58000.0000** | **24000.0000** | **3000.0000** | **468.05 MB** |
- | CrossSSTableRead         | 50000      | 0.8          |             NA |            NA |           NA |              NA |             NA |            NA |            NA |
- | RangeQueryAcrossSSTables | 50000      | 0.8          |       736.5 ms |     648.67 ms |     35.56 ms |      59000.0000 |     21000.0000 |     4000.0000 |     460.19 MB |
- | RealisticWorkload        | 50000      | 0.8          |       730.8 ms |     275.79 ms |     15.12 ms |      62000.0000 |     25000.0000 |     5000.0000 |     477.58 MB |
- | PostCompactionRead       | 50000      | 0.8          |     1,625.1 ms |     296.64 ms |     16.26 ms |      56000.0000 |     23000.0000 |     3000.0000 |     448.69 MB |
- | MemoryEfficiencyTest     | 50000      | 0.8          |       841.8 ms |     428.07 ms |     23.46 ms |      67000.0000 |     31000.0000 |    11000.0000 |     483.21 MB |
- | **LayeredWrite**         | **100000** | **0.2**      |         **NA** |        **NA** |       **NA** |          **NA** |         **NA** |        **NA** |        **NA** |
- | CrossSSTableRead         | 100000     | 0.2          |     1,338.9 ms |     314.99 ms |     17.27 ms |     102000.0000 |     41000.0000 |     4000.0000 |     820.28 MB |
- | RangeQueryAcrossSSTables | 100000     | 0.2          |             NA |            NA |           NA |              NA |             NA |            NA |            NA |
- | RealisticWorkload        | 100000     | 0.2          |     1,235.6 ms |     160.03 ms |      8.77 ms |      97000.0000 |     37000.0000 |     4000.0000 |     779.16 MB |
- | PostCompactionRead       | 100000     | 0.2          |     2,022.0 ms |   1,281.32 ms |     70.23 ms |     103000.0000 |     41000.0000 |     5000.0000 |     829.49 MB |
- | MemoryEfficiencyTest     | 100000     | 0.2          |     1,550.0 ms |     945.71 ms |     51.84 ms |     103000.0000 |     43000.0000 |    10000.0000 |     779.09 MB |
- | **LayeredWrite**         | **100000** | **0.5**      | **1,212.5 ms** | **474.64 ms** | **26.02 ms** |  **99000.0000** | **36000.0000** | **4000.0000** | **799.44 MB** |
- | CrossSSTableRead         | 100000     | 0.5          |     1,370.8 ms |     142.10 ms |      7.79 ms |     109000.0000 |     41000.0000 |     4000.0000 |     882.44 MB |
- | RangeQueryAcrossSSTables | 100000     | 0.5          |             NA |            NA |           NA |              NA |             NA |            NA |            NA |
- | RealisticWorkload        | 100000     | 0.5          |             NA |            NA |           NA |              NA |             NA |            NA |            NA |
- | PostCompactionRead       | 100000     | 0.5          |     1,985.6 ms |     563.21 ms |     30.87 ms |      89000.0000 |     36000.0000 |     3000.0000 |     726.93 MB |
- | MemoryEfficiencyTest     | 100000     | 0.5          |     1,485.7 ms |   5,142.63 ms |    281.88 ms |      92000.0000 |     40000.0000 |    11000.0000 |     689.25 MB |
- | **LayeredWrite**         | **100000** | **0.8**      | **1,274.8 ms** | **401.52 ms** | **22.01 ms** | **106000.0000** | **40000.0000** | **4000.0000** | **860.48 MB** |
- | CrossSSTableRead         | 100000     | 0.8          |     1,482.3 ms |   1,355.56 ms |     74.30 ms |     123000.0000 |     48000.0000 |     4000.0000 |     998.54 MB |
- | RangeQueryAcrossSSTables | 100000     | 0.8          |     1,298.9 ms |     151.39 ms |      8.30 ms |     112000.0000 |     42000.0000 |     3000.0000 |     916.32 MB |
- | RealisticWorkload        | 100000     | 0.8          |     1,314.2 ms |   1,294.66 ms |     70.96 ms |     107000.0000 |     40000.0000 |     3000.0000 |        878 MB |
- | PostCompactionRead       | 100000     | 0.8          |     2,041.4 ms |   1,474.29 ms |     80.81 ms |     113000.0000 |     44000.0000 |     7000.0000 |     904.44 MB |
- | MemoryEfficiencyTest     | 100000     | 0.8          |     1,594.2 ms |     867.27 ms |     47.54 ms |     113000.0000 |     44000.0000 |    11000.0000 |     865.11 MB |
-
-Benchmarks with issues:
-  AdvancedBenchmarks.RealisticWorkload: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [DataSize=10000, HotDataRatio=0.2]
-  AdvancedBenchmarks.CrossSSTableRead: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [DataSize=50000, HotDataRatio=0.8]
-  AdvancedBenchmarks.LayeredWrite: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [DataSize=100000, HotDataRatio=0.2]
-  AdvancedBenchmarks.RangeQueryAcrossSSTables: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [DataSize=100000, HotDataRatio=0.2]
-  AdvancedBenchmarks.RangeQueryAcrossSSTables: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [DataSize=100000, HotDataRatio=0.5]
-  AdvancedBenchmarks.RealisticWorkload: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [DataSize=100000, HotDataRatio=0.5]
+ | Method                   | DataSize   | HotDataRatio |          Mean |            Error |         StdDev |        Median |           Gen0 |          Gen1 |      Gen2 |     Allocated |
+ | ------------------------ | ---------- | ------------ | ------------: | ---------------: | -------------: | ------------: | -------------: | ------------: | --------: | ------------: |
+ | **LayeredWrite**         | **10000**  | **0.2**      |  **96.50 ms** |   **155.794 ms** |   **8.540 ms** |  **98.65 ms** |  **3000.0000** |         **-** |     **-** |  **27.54 MB** |
+ | CrossSSTableRead         | 10000      | 0.2          |     106.86 ms |       209.310 ms |      11.473 ms |     112.97 ms |      3000.0000 |             - |         - |       29.7 MB |
+ | RangeQueryAcrossSSTables | 10000      | 0.2          |     101.10 ms |       159.050 ms |       8.718 ms |     102.71 ms |      3000.0000 |             - |         - |      29.13 MB |
+ | RealisticWorkload        | 10000      | 0.2          |      97.26 ms |         6.872 ms |       0.377 ms |      97.15 ms |      3000.0000 |             - |         - |         29 MB |
+ | PostCompactionRead       | 10000      | 0.2          |     109.77 ms |       256.451 ms |      14.057 ms |     115.97 ms |      3000.0000 |             - |         - |      28.19 MB |
+ | MemoryEfficiencyTest     | 10000      | 0.2          |     116.28 ms |        69.641 ms |       3.817 ms |     116.17 ms |     11000.0000 |     9000.0000 | 8000.0000 |       28.1 MB |
+ | **LayeredWrite**         | **10000**  | **0.5**      | **102.90 ms** |   **286.754 ms** |  **15.718 ms** | **102.58 ms** |  **3000.0000** |         **-** |     **-** |  **27.41 MB** |
+ | CrossSSTableRead         | 10000      | 0.5          |     112.93 ms |       254.963 ms |      13.975 ms |     119.38 ms |      4000.0000 |             - |         - |      34.13 MB |
+ | RangeQueryAcrossSSTables | 10000      | 0.5          |     105.78 ms |        40.464 ms |       2.218 ms |     106.31 ms |      3000.0000 |             - |         - |      27.35 MB |
+ | RealisticWorkload        | 10000      | 0.5          |      96.90 ms |       157.741 ms |       8.646 ms |      96.46 ms |      3000.0000 |             - |         - |      28.81 MB |
+ | PostCompactionRead       | 10000      | 0.5          |     107.16 ms |        21.788 ms |       1.194 ms |     107.13 ms |      3000.0000 |             - |         - |      25.86 MB |
+ | MemoryEfficiencyTest     | 10000      | 0.5          |     149.88 ms |       331.686 ms |      18.181 ms |     150.66 ms |     10000.0000 |     9000.0000 | 8000.0000 |      24.93 MB |
+ | **LayeredWrite**         | **10000**  | **0.8**      | **102.45 ms** |   **287.615 ms** |  **15.765 ms** | **108.15 ms** |  **3000.0000** |         **-** |     **-** |  **28.33 MB** |
+ | CrossSSTableRead         | 10000      | 0.8          |     118.83 ms |       253.934 ms |      13.919 ms |     121.13 ms |      4000.0000 |             - |         - |      36.92 MB |
+ | RangeQueryAcrossSSTables | 10000      | 0.8          |     108.95 ms |       112.759 ms |       6.181 ms |     111.34 ms |      3000.0000 |     1000.0000 |         - |      24.43 MB |
+ | RealisticWorkload        | 10000      | 0.8          |     102.38 ms |       303.125 ms |      16.615 ms |      94.43 ms |      3000.0000 |             - |         - |       28.6 MB |
+ | PostCompactionRead       | 10000      | 0.8          |     102.96 ms |       129.956 ms |       7.123 ms |     104.33 ms |      3000.0000 |             - |         - |      26.09 MB |
+ | MemoryEfficiencyTest     | 10000      | 0.8          |     152.72 ms |        54.163 ms |       2.969 ms |     151.67 ms |     12000.0000 |    10000.0000 | 9000.0000 |      32.47 MB |
+ | **LayeredWrite**         | **50000**  | **0.2**      | **339.07 ms** |   **474.768 ms** |  **26.024 ms** | **354.05 ms** | **18000.0000** | **3000.0000** |     **-** | **145.69 MB** |
+ | CrossSSTableRead         | 50000      | 0.2          |     451.86 ms |       453.921 ms |      24.881 ms |     452.22 ms |     20000.0000 |     5000.0000 |         - |     161.37 MB |
+ | RangeQueryAcrossSSTables | 50000      | 0.2          |     327.66 ms |       790.972 ms |      43.356 ms |     340.18 ms |     17000.0000 |     2000.0000 |         - |     138.39 MB |
+ | RealisticWorkload        | 50000      | 0.2          |     287.29 ms |        44.688 ms |       2.450 ms |     286.41 ms |     17000.0000 |     3000.0000 |         - |     140.47 MB |
+ | PostCompactionRead       | 50000      | 0.2          |     278.58 ms |       313.608 ms |      17.190 ms |     275.45 ms |     17000.0000 |     2000.0000 |         - |     139.67 MB |
+ | MemoryEfficiencyTest     | 50000      | 0.2          |     514.33 ms |     2,954.962 ms |     161.971 ms |     544.40 ms |     25000.0000 |    12000.0000 | 7000.0000 |     148.08 MB |
+ | **LayeredWrite**         | **50000**  | **0.5**      | **353.12 ms** | **1,099.270 ms** |  **60.255 ms** | **384.56 ms** | **17000.0000** | **3000.0000** |     **-** | **139.74 MB** |
+ | CrossSSTableRead         | 50000      | 0.5          |     394.43 ms |       771.875 ms |      42.309 ms |     396.82 ms |     23000.0000 |     6000.0000 |         - |     181.09 MB |
+ | RangeQueryAcrossSSTables | 50000      | 0.5          |     268.74 ms |       328.713 ms |      18.018 ms |     262.24 ms |     17000.0000 |     4000.0000 |         - |     140.16 MB |
+ | RealisticWorkload        | 50000      | 0.5          |     283.68 ms |       213.545 ms |      11.705 ms |     284.74 ms |     17000.0000 |     2000.0000 |         - |     140.22 MB |
+ | PostCompactionRead       | 50000      | 0.5          |     270.88 ms |       210.303 ms |      11.527 ms |     276.88 ms |     17000.0000 |     2000.0000 |         - |     140.15 MB |
+ | MemoryEfficiencyTest     | 50000      | 0.5          |     487.33 ms |       649.218 ms |      35.586 ms |     506.98 ms |     25000.0000 |    12000.0000 | 8000.0000 |     143.36 MB |
+ | **LayeredWrite**         | **50000**  | **0.8**      | **444.49 ms** | **2,997.087 ms** | **164.280 ms** | **473.46 ms** | **17000.0000** | **3000.0000** |     **-** | **137.87 MB** |
+ | CrossSSTableRead         | 50000      | 0.8          |     387.09 ms |       275.749 ms |      15.115 ms |     382.03 ms |     25000.0000 |     8000.0000 | 1000.0000 |     194.63 MB |
+ | RangeQueryAcrossSSTables | 50000      | 0.8          |     361.68 ms |     2,034.902 ms |     111.540 ms |     325.65 ms |     17000.0000 |     2000.0000 |         - |     137.91 MB |
+ | RealisticWorkload        | 50000      | 0.8          |     437.98 ms |     2,879.868 ms |     157.855 ms |     425.10 ms |     17000.0000 |     2000.0000 |         - |     140.34 MB |
+ | PostCompactionRead       | 50000      | 0.8          |     326.45 ms |     2,293.305 ms |     125.704 ms |     255.99 ms |     17000.0000 |     2000.0000 |         - |     140.26 MB |
+ | MemoryEfficiencyTest     | 50000      | 0.8          |     385.14 ms |       753.882 ms |      41.323 ms |     396.30 ms |     25000.0000 |    11000.0000 | 7000.0000 |     148.34 MB |
+ | **LayeredWrite**         | **100000** | **0.2**      | **536.88 ms** |   **242.890 ms** |  **13.314 ms** | **537.61 ms** | **35000.0000** | **9000.0000** |     **-** |  **282.1 MB** |
+ | CrossSSTableRead         | 100000     | 0.2          |     630.85 ms |     1,549.114 ms |      84.912 ms |     586.61 ms |     43000.0000 |     9000.0000 |         - |     346.14 MB |
+ | RangeQueryAcrossSSTables | 100000     | 0.2          |     518.80 ms |        18.288 ms |       1.002 ms |     518.36 ms |     35000.0000 |     6000.0000 |         - |     281.81 MB |
+ | RealisticWorkload        | 100000     | 0.2          |     537.73 ms |        49.444 ms |       2.710 ms |     537.67 ms |     35000.0000 |     7000.0000 |         - |     284.09 MB |
+ | PostCompactionRead       | 100000     | 0.2          |     531.07 ms |       240.311 ms |      13.172 ms |     534.19 ms |     35000.0000 |     7000.0000 |         - |      283.2 MB |
+ | MemoryEfficiencyTest     | 100000     | 0.2          |     692.77 ms |       549.796 ms |      30.136 ms |     691.39 ms |     43000.0000 |    15000.0000 | 8000.0000 |     293.35 MB |
+ | **LayeredWrite**         | **100000** | **0.5**      | **527.29 ms** |   **225.467 ms** |  **12.359 ms** | **525.99 ms** | **35000.0000** | **6000.0000** |     **-** | **283.73 MB** |
+ | CrossSSTableRead         | 100000     | 0.5          |     645.66 ms |        39.622 ms |       2.172 ms |     646.42 ms |     47000.0000 |    12000.0000 | 1000.0000 |     366.26 MB |
+ | RangeQueryAcrossSSTables | 100000     | 0.5          |     516.99 ms |        45.545 ms |       2.496 ms |     518.43 ms |     35000.0000 |     7000.0000 |         - |     284.12 MB |
+ | RealisticWorkload        | 100000     | 0.5          |     523.73 ms |       136.464 ms |       7.480 ms |     522.42 ms |     35000.0000 |     5000.0000 |         - |     283.62 MB |
+ | PostCompactionRead       | 100000     | 0.5          |     527.52 ms |       133.740 ms |       7.331 ms |     528.61 ms |     35000.0000 |     7000.0000 |         - |     283.44 MB |
+ | MemoryEfficiencyTest     | 100000     | 0.5          |     684.95 ms |       112.493 ms |       6.166 ms |     685.44 ms |     43000.0000 |    14000.0000 | 7000.0000 |     293.19 MB |
+ | **LayeredWrite**         | **100000** | **0.8**      | **519.95 ms** |   **155.189 ms** |   **8.506 ms** | **518.77 ms** | **36000.0000** | **7000.0000** |     **-** | **285.64 MB** |
+ | CrossSSTableRead         | 100000     | 0.8          |     702.99 ms |        95.882 ms |       5.256 ms |     705.73 ms |     50000.0000 |    15000.0000 | 1000.0000 |      394.3 MB |
+ | RangeQueryAcrossSSTables | 100000     | 0.8          |     507.88 ms |        52.958 ms |       2.903 ms |     506.88 ms |     36000.0000 |     6000.0000 |         - |     285.42 MB |
+ | RealisticWorkload        | 100000     | 0.8          |     513.79 ms |       167.061 ms |       9.157 ms |     511.15 ms |     36000.0000 |     7000.0000 |         - |      286.2 MB |
+ | PostCompactionRead       | 100000     | 0.8          |     534.20 ms |       234.253 ms |      12.840 ms |     538.81 ms |     36000.0000 |     7000.0000 |         - |     285.93 MB |
+ | MemoryEfficiencyTest     | 100000     | 0.8          |     681.36 ms |       286.187 ms |      15.687 ms |     688.45 ms |     43000.0000 |    13000.0000 | 7000.0000 |      291.2 MB |
