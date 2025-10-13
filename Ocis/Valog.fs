@@ -305,6 +305,9 @@ and Valog
           File.Delete valog.Path
           File.Move (tempValogPath, valog.Path)
 
+          // Small delay to ensure file handles are released by the OS
+          do! Async.Sleep 10
+
           // Reopen Valog instance
           match Valog.Create valog.Path with
           | Ok newValog ->
