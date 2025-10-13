@@ -212,112 +212,125 @@ type SSTbl
     let mutable fileStream : FileStream = null // Declare a mutable variable to close the stream in case of an exception
     let mutable reader : BinaryReader = null
 
-    try
-      // Validate path before attempting to open
-      if System.String.IsNullOrWhiteSpace path then
-        Logger.Error "SSTable path is null or empty"
-        None
-      elif not (System.IO.File.Exists path) then
-        Logger.Debug $"SSTable file does not exist: {path}"
-        None
-      elif (new System.IO.FileInfo (path)).Length = 0L then
-        Logger.Error $"SSTable file is empty: {path}"
-        None
-      else
-        fileStream <-
-          new FileStream (path, FileMode.Open, FileAccess.Read, FileShare.Read)
-        // BinaryReader uses the leaveOpen: true parameter to ensure that the FileStream is not closed when the BinaryReader is disposed
-        reader <- new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
-
-        // 1. Read footer (Footer)
-        // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
-        fileStream.Seek (-4L, SeekOrigin.End) |> ignore
-        let footerSize = reader.ReadInt32 () // Read the size of the footer content (excluding footerSize itself)
-
-        // Validate footer size
-        if footerSize <= 0 || footerSize > int fileStream.Length then
-          Logger.Error $"Invalid footer size {footerSize} in SSTable '{path}'"
-          if reader <> null then reader.Dispose ()
-          if fileStream <> null then fileStream.Dispose ()
+    // Retry logic for concurrent access
+    let rec tryOpen attempts =
+      try
+        // Validate path before attempting to open
+        if System.String.IsNullOrWhiteSpace path then
+          Logger.Error "SSTable path is null or empty"
+          None
+        elif not (System.IO.File.Exists path) then
+          Logger.Debug $"SSTable file does not exist: {path}"
+          None
+        elif (new System.IO.FileInfo (path)).Length = 0L then
+          Logger.Error $"SSTable file is empty: {path}"
           None
         else
-          // Now, move the file pointer back to the starting position of the footer content (timestamp).
-          // The total amount of backtracking is footerSize + 4 bytes occupied by footerSize itself.
-          fileStream.Seek (-(int64 footerSize + 4L), SeekOrigin.End) |> ignore
+          fileStream <-
+            new FileStream (
+              path,
+              FileMode.Open,
+              FileAccess.Read,
+              FileShare.Read
+            )
+          // BinaryReader uses the leaveOpen: true parameter to ensure that the FileStream is not closed when the BinaryReader is disposed
+          reader <-
+            new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
 
-          let timestamp = reader.ReadInt64 ()
-          let level = reader.ReadInt32 ()
-          let lowKey = Serialization.readByteArray reader
-          let highKey = Serialization.readByteArray reader
-          let indexBlockStartOffset = reader.ReadInt64 ()
-          let indexEntriesCount = reader.ReadInt32 ()
-          reader.ReadInt32 () |> ignore // Read and discard the footerSize field that we have already read
+          // Continue with the rest of the opening logic...
+          // 1. Read footer (Footer)
+          // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
+          fileStream.Seek (-4L, SeekOrigin.End) |> ignore
+          let footerSize = reader.ReadInt32 () // Read the size of the footer content (excluding footerSize itself)
 
-          // Validate index data
-          if indexEntriesCount < 0 then
-            Logger.Error
-              $"Invalid index entries count {indexEntriesCount} in SSTable '{path}'"
-
-            if reader <> null then reader.Dispose ()
-            if fileStream <> null then fileStream.Dispose ()
-            None
-          elif
-            indexBlockStartOffset < 0L
-            || indexBlockStartOffset >= fileStream.Length
-          then
-            Logger.Error
-              $"Invalid index block offset {indexBlockStartOffset} in SSTable '{path}'"
-
+          // Validate footer size
+          if footerSize <= 0 || footerSize > int fileStream.Length then
+            Logger.Error $"Invalid footer size {footerSize} in SSTable '{path}'"
             if reader <> null then reader.Dispose ()
             if fileStream <> null then fileStream.Dispose ()
             None
           else
-            // 2. Read index block (Index Block)
-            fileStream.Seek (indexBlockStartOffset, SeekOrigin.Begin) |> ignore // Jump to the starting position of the index block
-            let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
+            // Now, move the file pointer back to the starting position of the footer content (timestamp).
+            // The total amount of backtracking is footerSize + 4 bytes occupied by footerSize itself.
+            fileStream.Seek (-(int64 footerSize + 4L), SeekOrigin.End) |> ignore
 
-            for i = 0 to indexEntriesCount - 1 do
-              recordOffsets[i] <- reader.ReadInt64 ()
+            let timestamp = reader.ReadInt64 ()
+            let level = reader.ReadInt32 ()
+            let lowKey = Serialization.readByteArray reader
+            let highKey = Serialization.readByteArray reader
+            let indexBlockStartOffset = reader.ReadInt64 ()
+            let indexEntriesCount = reader.ReadInt32 ()
+            reader.ReadInt32 () |> ignore // Read and discard the footerSize field that we have already read
 
-            Some (
-              new SSTbl (
-                path,
-                timestamp,
-                level,
-                fileStream,
-                reader,
-                recordOffsets,
-                lowKey,
-                highKey
+            // Validate index data
+            if indexEntriesCount < 0 then
+              Logger.Error
+                $"Invalid index entries count {indexEntriesCount} in SSTable '{path}'"
+
+              if reader <> null then reader.Dispose ()
+              if fileStream <> null then fileStream.Dispose ()
+              None
+            elif
+              indexBlockStartOffset < 0L
+              || indexBlockStartOffset >= fileStream.Length
+            then
+              Logger.Error
+                $"Invalid index block offset {indexBlockStartOffset} in SSTable '{path}'"
+
+              if reader <> null then reader.Dispose ()
+              if fileStream <> null then fileStream.Dispose ()
+              None
+            else
+              // 2. Read index block (Index Block)
+              fileStream.Seek (indexBlockStartOffset, SeekOrigin.Begin)
+              |> ignore // Jump to the starting position of the index block
+
+              let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
+
+              for i = 0 to indexEntriesCount - 1 do
+                recordOffsets[i] <- reader.ReadInt64 ()
+
+              Some (
+                new SSTbl (
+                  path,
+                  timestamp,
+                  level,
+                  fileStream,
+                  reader,
+                  recordOffsets,
+                  lowKey,
+                  highKey
+                )
               )
-            )
-    with
-    | :? System.IO.FileNotFoundException ->
-      Logger.Debug $"SSTable file not found: {path}"
-      if reader <> null then reader.Dispose ()
-      if fileStream <> null then fileStream.Dispose ()
-      None
-    | :? System.IO.IOException as ioEx ->
-      Logger.Error $"I/O error opening SSTable '{path}': {ioEx.Message}"
-      if reader <> null then reader.Dispose ()
-      if fileStream <> null then fileStream.Dispose ()
-      None
-    | :? System.UnauthorizedAccessException ->
-      Logger.Error $"Access denied opening SSTable '{path}'"
-      if reader <> null then reader.Dispose ()
-      if fileStream <> null then fileStream.Dispose ()
-      None
-    | :? System.IO.EndOfStreamException ->
-      Logger.Error $"Corrupted SSTable file (unexpected end of stream): {path}"
-      if reader <> null then reader.Dispose ()
-      if fileStream <> null then fileStream.Dispose ()
-      None
-    | ex ->
-      Logger.Error $"Exception type: {ex.GetType().FullName}"
-      Logger.Error $"Unexpected error opening SSTable '{path}': {ex.Message}"
-      if reader <> null then reader.Dispose ()
-      if fileStream <> null then fileStream.Dispose ()
-      None
+      with
+      | :? System.IO.IOException as ioEx when attempts < 3 ->
+        // Retry on I/O errors (file might be locked or being written)
+        Logger.Warn
+          $"I/O error opening SSTable '{path}' (attempt {attempts + 1}): {ioEx.Message}"
+
+        if reader <> null then reader.Dispose ()
+        if fileStream <> null then fileStream.Dispose ()
+        System.Threading.Thread.Sleep 50 // Small delay before retry
+        tryOpen (attempts + 1)
+      | ex when attempts < 3 ->
+        // Retry on other errors
+        Logger.Warn
+          $"Error opening SSTable '{path}' (attempt {attempts + 1}): {ex.Message}"
+
+        if reader <> null then reader.Dispose ()
+        if fileStream <> null then fileStream.Dispose ()
+        System.Threading.Thread.Sleep 50 // Small delay before retry
+        tryOpen (attempts + 1)
+      | ex ->
+        // Give up after retries
+        Logger.Error
+          $"Failed to open SSTable '{path}' after {attempts + 1} attempts: {ex.Message}"
+
+        if reader <> null then reader.Dispose ()
+        if fileStream <> null then fileStream.Dispose ()
+        None
+
+    tryOpen 0
 
   /// <summary>
   /// Get the value location of the given key from SSTbl.
