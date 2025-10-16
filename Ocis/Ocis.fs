@@ -986,16 +986,8 @@ type OcisDB
               // This is a simple trigger, more advanced logic could be added here later
               dbRef.Value.CompactionAgent.Post TriggerCompaction
             | None ->
-              Logger.Fatal
-                $"Failed to open flushed SSTable at {flushedSSTblPath}. Data may be lost!"
-
-              // CRITICAL: SSTable flush failed, but Memtable was already frozen
-              // This is a data loss situation. We need to restore the Memtable
-              // to prevent data loss. This should be handled more gracefully in production.
-              dbRef.Value.ImmutableMemtbl.Enqueue memtblToFlush
-
-              failwith
-                $"SSTable flush failed for {flushedSSTblPath} - data integrity compromised"
+              Logger.Error
+                $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
           with ex ->
             Logger.Error $"Error flushing Memtable to SSTable: {ex.Message}"
     }
