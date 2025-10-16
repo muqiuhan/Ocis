@@ -33,7 +33,6 @@ The project includes both an embedded storage engine library (`Ocis`) and a high
 
 ## Performance Benchmarks
 
-
 BenchmarkDotNet v0.15.2, Linux Pop!_OS 22.04 LTS
 AMD Ryzen 7 6800H with Radeon Graphics 4.79GHz, 1 CPU, 16 logical and 8 physical cores
 .NET SDK 10.0.100-preview.7.25380.108
@@ -45,18 +44,27 @@ LaunchCount=1  UnrollFactor=1  WarmupCount=3
 
  | Method      | Count      |           Mean |         Error |        StdDev |           Gen0 |      Gen1 |       Allocated |
  | ----------- | ---------- | -------------: | ------------: | ------------: | -------------: | --------: | --------------: |
- | **BulkSet** | **1000**   |   **5.902 ms** |  **9.831 ms** | **0.5389 ms** |          **-** |     **-** |   **966.63 KB** |
- | BulkGet     | 1000       |       8.091 ms |     22.982 ms |     1.2597 ms |              - |         - |      2000.38 KB |
- | **BulkSet** | **10000**  |  **72.198 ms** | **23.917 ms** | **1.3110 ms** |  **1000.0000** |     **-** |  **9644.81 KB** |
- | BulkGet     | 10000      |      87.928 ms |    115.532 ms |     6.3327 ms |      2000.0000 | 1000.0000 |     19607.16 KB |
- | **BulkSet** | **100000** | **273.698 ms** | **11.942 ms** | **0.6546 ms** | **11000.0000** |     **-** | **95511.63 KB** |
- | BulkGet     | 100000     |     430.295 ms |    786.485 ms |    43.1099 ms |     23000.0000 | 4000.0000 |    195672.41 KB |
+ | **BulkSet** | **1000**   |   **5.480 ms** |  **3.535 ms** | **0.1937 ms** |          **-** |     **-** |   **966.56 KB** |
+ | BulkGet     | 1000       |       8.617 ms |     17.465 ms |     0.9573 ms |              - |         - |      2001.44 KB |
+ | **BulkSet** | **10000**  |  **58.916 ms** | **29.374 ms** | **1.6101 ms** |  **1000.0000** |     **-** |  **9562.02 KB** |
+ | BulkGet     | 10000      |     103.432 ms |     42.838 ms |     2.3481 ms |      2000.0000 | 1000.0000 |     19608.22 KB |
+ | **BulkSet** | **100000** | **283.876 ms** |  **2.947 ms** | **0.1615 ms** | **11000.0000** |     **-** | **95509.73 KB** |
+ | BulkGet     | 100000     |     369.380 ms |    114.501 ms |     6.2762 ms |     23000.0000 | 4000.0000 |    195672.41 KB |
+
 
 **Note**: These figures represent memory allocated per *operation* during the benchmark run, not the total private memory size of the process. For persistent storage engines, actual memory consumption may vary depending on data volume and internal caching mechanisms.
 
 ## Network Server and Protocol
 
-Ocis provides a TCP server (`Ocis.Server`) that exposes the WiscKey storage engine over the network using a custom binary protocol. The server supports concurrent client connections and provides full CRUD operations.
+Ocis provides a high-performance TCP server (`Ocis.Server`) that exposes the WiscKey storage engine over the network using a custom binary protocol. The server supports concurrent client connections and provides full CRUD operations.
+
+### Server Features
+
+- **High Performance**: Built on .NET's high-performance networking stack with optimized async I/O
+- **Concurrent Connections**: Supports up to 1000 concurrent client connections by default
+- **Binary Protocol**: Efficient custom binary protocol with minimal overhead
+- **Production Ready**: Includes comprehensive error handling, logging, and graceful shutdown
+- **Native AOT Compatible**: Can be compiled to a self-contained native executable
 
 ### Starting the Server
 
@@ -99,13 +107,13 @@ All packets begin with an 18-byte fixed header:
 
 #### Field Descriptions
 
-- Magic Number: 4 bytes, always `0x5349434F` ("OCIS" in ASCII)
-- Version: 1 byte, protocol version (currently `0x01`)
-- Command/Status: 1 byte, command type for requests or status code for responses
-- Total Length: 4 bytes, total packet length including header
-- Key Length: 4 bytes, length of the key in payload
-- Value/Error Length: 4 bytes, length of value (responses) or error message
-- Payload: Variable length, contains key and value data
+- **Magic Number**: 4 bytes, always `0x5349434F` ("OCIS" in ASCII)
+- **Version**: 1 byte, protocol version (currently `0x01`)
+- **Command/Status**: 1 byte, command type for requests or status code for responses
+- **Total Length**: 4 bytes, total packet length including header
+- **Key Length**: 4 bytes, length of the key in payload
+- **Value/Error Length**: 4 bytes, length of value (responses) or error message
+- **Payload**: Variable length, contains key and value data
 
 #### Command Types
 
@@ -125,34 +133,34 @@ All packets begin with an 18-byte fixed header:
 
 #### Request Format
 
-SET Request:
+**SET Request:**
 ```
 Header (18 bytes) + Key (variable) + Value (variable)
 ```
 
-GET Request:
+**GET Request:**
 ```
 Header (18 bytes) + Key (variable)
 ```
 
-DELETE Request:
+**DELETE Request:**
 ```
 Header (18 bytes) + Key (variable)
 ```
 
 #### Response Format
 
-Success Response (with value):
+**Success Response (with value):**
 ```
 Header (18 bytes) + Value (variable)
 ```
 
-Success Response (no value):
+**Success Response (no value):**
 ```
 Header (18 bytes)
 ```
 
-Error Response:
+**Error Response:**
 ```
 Header (18 bytes) + Error Message (variable)
 ```
@@ -230,9 +238,9 @@ dotnet run --project Ocis.Tests -- simple/base/advance
 
 The server tests include:
 
-- Protocol Tests: Binary protocol serialization/deserialization
-- Client Tests: End-to-end client-server communication (requires running server)
-- Integration Tests: Configuration validation and server lifecycle
+- **Protocol Tests**: Binary protocol serialization/deserialization
+- **Client Tests**: End-to-end client-server communication (requires running server)
+- **Integration Tests**: Configuration validation and server lifecycle
 
 To run client tests that require a running server:
 
