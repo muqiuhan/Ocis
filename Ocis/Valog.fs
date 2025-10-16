@@ -152,11 +152,6 @@ and Valog
       // Write the length of the value and the value byte array
       writer.Write value.Length
       writer.Write value // BinaryWriter directly
-
-      // Flush to ensure data is written before updating head
-      writer.Flush ()
-
-      // Update head AFTER all data is written and flushed
       head <- fileStream.Position
       entryStartOffset // Return the offset at which this new entry starts.
     )
