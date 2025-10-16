@@ -178,51 +178,15 @@ and Valog
           // Move the file stream pointer to the specified position.
           fileStream.Seek (location, SeekOrigin.Begin) |> ignore
 
-          // Additional validation: ensure we have enough data to read
-          let bytesAvailable = head - location
+          // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
+          let keyLength = reader.ReadInt32 ()
+          let key = reader.ReadBytes keyLength
 
-          if bytesAvailable < 8L then // Need at least 8 bytes for two int32 lengths
-            Logger.Warn
-              $"Insufficient data at location {location}, only {bytesAvailable} bytes available"
+          // Read the length of the value and the value byte array
+          let valueLength = reader.ReadInt32 ()
+          let value = reader.ReadBytes valueLength
 
-            None
-          else
-            // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
-            let keyLength = reader.ReadInt32 ()
-
-            // Validate key length
-            if keyLength <= 0 || keyLength > 1024 * 1024 then // Reasonable upper bound
-              Logger.Warn
-                $"Invalid key length {keyLength} at location {location}"
-
-              None
-            elif int64 keyLength > bytesAvailable - 8L then // Not enough data for key + value lengths
-              Logger.Warn
-                $"Key length {keyLength} exceeds available data at location {location}"
-
-              None
-            else
-              let key = reader.ReadBytes keyLength
-
-              // Read the length of the value and the value byte array
-              let valueLength = reader.ReadInt32 ()
-
-              // Validate value length
-              if valueLength < 0 || valueLength > 10 * 1024 * 1024 then // 10MB upper bound
-                Logger.Warn
-                  $"Invalid value length {valueLength} at location {location}"
-
-                None
-              elif
-                int64 valueLength > fileStream.Length - fileStream.Position
-              then
-                Logger.Warn
-                  $"Value length {valueLength} exceeds remaining file data at location {location}"
-
-                None
-              else
-                let value = reader.ReadBytes valueLength
-                Some (key, value) // Return the read key-value pair.
+          Some (key, value) // Return the read key-value pair.
         with
         | :? EndOfStreamException ->
           // If the file is corrupted or the given position points to an incomplete entry (e.g., due to a crash), this may happen.
