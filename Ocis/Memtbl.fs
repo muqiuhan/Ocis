@@ -67,8 +67,8 @@ type Memtbl() =
         | Some _ ->
             match memtbl.Remove key with
             | true -> memtbl.Add(key, -1L)
-            | false -> failwith "Failed to delete key"
-        | None -> failwith "Key not found"
+            | false -> failwith $"Failed to delete key: {key}"
+        | None -> failwith $"Key not found: ${key}"
 
     /// <summary>
     /// Delete a key from Memtbl.

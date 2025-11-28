@@ -2,7 +2,6 @@ module Ocis.Utils.Serialization
 
 open System.IO
 open System.Buffers
-open System.Collections.Concurrent
 open Ocis.ValueLocation
 
 module internal Serialization =
