@@ -93,9 +93,6 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
         let mutable writer: BinaryWriter = null
 
         try
-            // FileMode.OpenOrCreate: if the file exists, it will be opened. Otherwise, a new file will be created.
-            // FileAccess.ReadWrite: read and write permissions are required.
-            // FileShare.ReadWrite: allows other processes or threads to share read and write files, and a lock mechanism is needed to coordinate when accessed concurrently.
             fileStream <- new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite)
 
             // Initialize Head to the current length of the file. If the file is new, the length is 0.
@@ -110,7 +107,31 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
 
             Ok(new Valog(path, fileStream, reader, writer, head, tail))
         with ex ->
-            // Ensure all opened resources are closed if an error occurs during creation.
+            // Dispose any partially created resources to avoid handle leaks
+            match writer with
+            | null -> ()
+            | w ->
+                try
+                    w.Dispose()
+                with e ->
+                    failwith $"Failed to dispose writer: {e.Message}"
+
+            match reader with
+            | null -> ()
+            | r ->
+                try
+                    r.Dispose()
+                with e ->
+                    failwith $"Failed to dispose reader: {e.Message}"
+
+            match fileStream with
+            | null -> ()
+            | fs ->
+                try
+                    fs.Dispose()
+                with e ->
+                    failwith $"Failed to dispose file stream: {e.Message}"
+
             Error $"Failed to open or create Value Log file '{path}': {ex.Message}"
 
     /// <summary>
@@ -266,6 +287,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
 
                 if finalState.IsCompleted then
                     // Atomically replace the old Valog with the new one
+                    // Note: We don't dispose the old valog here - let the caller manage its lifecycle
                     File.Delete valog.Path
                     File.Move(tempValogPath, valog.Path)
 

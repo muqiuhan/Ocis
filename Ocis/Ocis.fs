@@ -32,7 +32,7 @@ type OcisDB
     (
         dir: string,
         currentMemtbl: Memtbl,
-        immutableMemtbls: Memtbl list, // Changed from ConcurrentQueue to simple list
+        immutableMemtbls: Memtbl list,
         ssTables: Map<int, SSTbl list>,
         valog: Valog,
         wal: Wal,
@@ -301,7 +301,6 @@ type OcisDB
     /// Design Decision: We use timestamp-based conflict resolution (latest wins) because:
     /// 1. It ensures deterministic behavior in distributed scenarios
     /// 2. It's consistent with LSM-tree semantics
-    /// 3. It provides predictable behavior for concurrent writes
     /// </summary>
     static member private mergeSSTables
         (dbRef: OcisDB ref, sstblsToMerge: SSTbl list, targetLevel: int, remappedLocations: Map<int64, int64> option)
@@ -561,10 +560,10 @@ type OcisDB
 
             if
                 Some targetLevel
-                <> (if not (sstblsToRemoveFromSource |> List.isEmpty) then
-                        Some sstblsToRemoveFromSource.Head.Level
-                    else
-                        None)
+                <> if not (sstblsToRemoveFromSource |> List.isEmpty) then
+                       Some sstblsToRemoveFromSource.Head.Level
+                   else
+                       None
             then // Only remove from target if it's a different level than source
                 updatedSSTables <-
                     updatedSSTables
@@ -816,9 +815,20 @@ type OcisDB
 
                     match remappedLocationsOption with
                     | Some(Ok(newValog, remappedLocations)) ->
+                        // Store reference to old valog for disposal
+                        let oldValog = this.ValueLog
+
+                        // Update to new valog
                         this.ValueLog <- newValog
 
                         Logger.Info $"GC completed: {remappedLocations.Count} locations remapped"
+
+                        // Dispose the old valog after successful replacement
+                        try
+                            (oldValog :> IDisposable).Dispose()
+                            Logger.Debug "Old Valog disposed after successful GC"
+                        with ex ->
+                            Logger.Warn $"Error disposing old Valog after GC: {ex.Message}"
 
                         // Handle remapped locations
                         for KeyValue(oldLoc, newLoc) in remappedLocations do
@@ -994,7 +1004,6 @@ type OcisDB
                         Error $"Failed to create database directory '{dir}': {ioEx.Message}"
                     | :? System.UnauthorizedAccessException ->
                         Error $"Access denied creating database directory '{dir}'"
-                    | :? System.IO.PathTooLongException -> Error $"Database directory path too long: '{dir}'"
 
                 match createDirResult with
                 | Error msg -> Error msg
@@ -1120,16 +1129,31 @@ type OcisDB
     /// </summary>
     member private this.EnsureValogAvailable() : Result<unit, string> =
         try
-            // Check if Valog is in an invalid state (after GC)
-            if obj.ReferenceEquals(this.ValueLog, null) then // Check for null first
-                Logger.Debug "Valog is invalid, reopening with retry logic..."
+            // Check if Valog is in an invalid state (null, disposed, or file closed)
+            let valogInvalid =
+                obj.ReferenceEquals(this.ValueLog, null)
+                || (try
+                        // Try to check if the FileStream is closed/disposed
+                        not this.ValueLog.FileStream.CanRead
+                    with _ ->
+                        true) // If we can't check, assume it's invalid
+
+            if valogInvalid then
+                Logger.Debug "Valog is invalid (null or disposed), reopening with retry logic..."
 
                 let valogPath = Path.Combine(this.Dir, "valog.vlog")
 
                 // Use a lock to ensure only one thread can recreate Valog
                 lock this (fun () ->
                     // Double-check after acquiring lock
-                    if obj.ReferenceEquals(this.ValueLog, null) then // Re-check for null
+                    let stillInvalid =
+                        obj.ReferenceEquals(this.ValueLog, null)
+                        || (try
+                                not this.ValueLog.FileStream.CanRead
+                            with _ ->
+                                true)
+
+                    if stillInvalid then
                         // Retry logic with exponential backoff
                         let rec retryOpen attempts =
                             if attempts >= 10 then // Increased from 5 to 10

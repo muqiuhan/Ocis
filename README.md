@@ -29,7 +29,7 @@ The project includes both an embedded storage engine library (`Ocis`) and a high
 *   **Key-Value Separation**: Unlike traditional LSM-Trees that store keys and values together, Ocis only stores `(key, value location in Value Log)` in the Memtable (in-memory mutable structure) and SSTable (on-disk immutable file), writing the actual values to an append-only **Value Log**. This significantly reduces the size of the LSM-Tree and I/O amplification, making it particularly suitable for SSDs.
 *   **LSM-Tree Structure**: The project implements Memtable (in-memory mutable structure), SSTable (on-disk immutable file), and Write-Ahead Log (WAL). Through a background Compaction process, SSTables are optimized and garbage collected.
 *   **Durability and Recovery**: **WAL (Write-Ahead Log)** ensures the durability of Memtable updates, supports crash recovery, and guarantees data consistency.
-*   **Network Server**: Ocis includes a high-performance TCP server implementation that provides network access to the WiscKey storage engine through a custom binary protocol, supporting concurrent client connections and CRUD operations.
+*   **Network Server**: Ocis includes a high-performance TCP server implementation that provides network access to the WiscKey storage engine through a custom binary protocol, supporting multiple client connections and CRUD operations.
 
 ## Performance Benchmarks
 
@@ -42,26 +42,26 @@ AMD Ryzen 7 6800H with Radeon Graphics 4.79GHz, 1 CPU, 16 logical and 8 physical
 Job=ShortRun  InvocationCount=1  IterationCount=3  
 LaunchCount=1  UnrollFactor=1  WarmupCount=3  
 
- | Method      | Count      |           Mean |         Error |        StdDev |           Gen0 |      Gen1 |       Allocated |
- | ----------- | ---------- | -------------: | ------------: | ------------: | -------------: | --------: | --------------: |
- | **BulkSet** | **1000**   |   **5.480 ms** |  **3.535 ms** | **0.1937 ms** |          **-** |     **-** |   **966.56 KB** |
- | BulkGet     | 1000       |       8.617 ms |     17.465 ms |     0.9573 ms |              - |         - |      2001.44 KB |
- | **BulkSet** | **10000**  |  **58.916 ms** | **29.374 ms** | **1.6101 ms** |  **1000.0000** |     **-** |  **9562.02 KB** |
- | BulkGet     | 10000      |     103.432 ms |     42.838 ms |     2.3481 ms |      2000.0000 | 1000.0000 |     19608.22 KB |
- | **BulkSet** | **100000** | **283.876 ms** |  **2.947 ms** | **0.1615 ms** | **11000.0000** |     **-** | **95509.73 KB** |
- | BulkGet     | 100000     |     369.380 ms |    114.501 ms |     6.2762 ms |     23000.0000 | 4000.0000 |    195672.41 KB |
+ | Method      | Count      |           Mean |         Error |        StdDev |          Gen0 |      Gen1 |       Allocated |
+ | ----------- | ---------- | -------------: | ------------: | ------------: | ------------: | --------: | --------------: |
+ | **BulkSet** | **1000**   |   **5.256 ms** |  **1.828 ms** | **0.1002 ms** |         **-** |     **-** |   **166.33 KB** |
+ | BulkGet     | 1000       |       6.607 ms |      7.182 ms |     0.3936 ms |             - |         - |       471.02 KB |
+ | **BulkSet** | **10000**  |  **66.772 ms** | **62.016 ms** | **3.3993 ms** |         **-** |     **-** |  **1432.04 KB** |
+ | BulkGet     | 10000      |      79.582 ms |      9.686 ms |     0.5309 ms |             - |         - |      4478.91 KB |
+ | **BulkSet** | **100000** | **254.601 ms** | **96.484 ms** | **5.2886 ms** | **1000.0000** |     **-** | **14089.41 KB** |
+ | BulkGet     | 100000     |     275.424 ms |     42.625 ms |     2.3364 ms |     5000.0000 | 2000.0000 |      44557.1 KB |
 
 
 **Note**: These figures represent memory allocated per *operation* during the benchmark run, not the total private memory size of the process. For persistent storage engines, actual memory consumption may vary depending on data volume and internal caching mechanisms.
 
 ## Network Server and Protocol
 
-Ocis provides a high-performance TCP server (`Ocis.Server`) that exposes the WiscKey storage engine over the network using a custom binary protocol. The server supports concurrent client connections and provides full CRUD operations.
+Ocis provides a high-performance TCP server (`Ocis.Server`) that exposes the WiscKey storage engine over the network using a custom binary protocol. The server supports multiple client connections and provides full CRUD operations.
 
 ### Server Features
 
 - **High Performance**: Built on .NET's high-performance networking stack with optimized async I/O
-- **Concurrent Connections**: Supports up to 1000 concurrent client connections by default
+- **Multiple Connections**: Supports up to 1000 client connections by default
 - **Binary Protocol**: Efficient custom binary protocol with minimal overhead
 - **Production Ready**: Includes comprehensive error handling, logging, and graceful shutdown
 - **Native AOT Compatible**: Can be compiled to a self-contained native executable
@@ -193,7 +193,7 @@ let response = readResponse(stream)
 | --------------------------- | ------- | --------------------------------------- |
 | `--host`                    | 0.0.0.0 | Server bind address                     |
 | `--port`                    | 7379    | Server port                             |
-| `--max-connections`         | 1000    | Maximum concurrent connections          |
+| `--max-connections`         | 1000    | Maximum number of connections           |
 | `--flush-threshold`         | 1000    | Memtable flush threshold                |
 | `--l0-compaction-threshold` | 4       | L0 SSTable compaction threshold         |
 | `--level-size-multiplier`   | 5       | LSM level size multiplier               |

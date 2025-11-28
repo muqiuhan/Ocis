@@ -231,7 +231,7 @@ type ErrorHandlingTests() =
     // Concurrent Access Tests
 
     [<Test>]
-    member this.ConcurrentSSTableAccess_ShouldHandleRaceConditions() =
+    member this.SequentialSSTableAccess_ShouldWorkCorrectly() =
         let memtbl = Memtbl()
 
         for i = 0 to 99 do

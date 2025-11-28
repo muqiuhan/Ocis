@@ -179,12 +179,6 @@ type SSTbl
         | :? System.UnauthorizedAccessException ->
             Logger.Error $"Access denied during SSTable flush to '{path}'"
             reraise ()
-        | :? System.IO.DirectoryNotFoundException ->
-            Logger.Error $"Directory not found for SSTable flush: '{path}'"
-            reraise ()
-        | :? System.IO.PathTooLongException ->
-            Logger.Error $"Path too long for SSTable flush: '{path}'"
-            reraise ()
         | ex ->
             Logger.Error $"Exception type: {ex.GetType().FullName}"
 
@@ -201,7 +195,6 @@ type SSTbl
         let mutable fileStream: FileStream = null // Declare a mutable variable to close the stream in case of an exception
         let mutable reader: BinaryReader = null
 
-        // Retry logic for concurrent access
         let rec tryOpen attempts =
             try
                 // Validate path before attempting to open
