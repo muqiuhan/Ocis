@@ -15,73 +15,64 @@ open Ocis.ValueLocation
 /// When Memtbl reaches a certain size, it will be "frozen" and flushed to SSTable on disk.
 /// Reference: [https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf]
 ///
-/// Thread Safety: This implementation is thread-safe for concurrent read/write operations.
+/// Single-threaded: Optimized for single-threaded operation with maximum performance.
 /// </remarks>
-type Memtbl () =
-  let memtbl =
-    SortedDictionary<byte array, ValueLocation>
-      ByteArrayComparer.ComparerInstance
+type Memtbl() =
+    let memtbl =
+        SortedDictionary<byte array, ValueLocation> ByteArrayComparer.ComparerInstance
 
-  // Lock object for thread synchronization
-  let lockObj = obj ()
+    interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
+        member _.GetEnumerator() =
+            memtbl.GetEnumerator() :> IEnumerator<KeyValuePair<byte array, ValueLocation>>
 
-  interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
-    member _.GetEnumerator () =
-      memtbl.GetEnumerator ()
-      :> IEnumerator<KeyValuePair<byte array, ValueLocation>>
+    interface Collections.IEnumerable with
+        member _.GetEnumerator() =
+            memtbl.GetEnumerator() :> Collections.IEnumerator
 
-  interface Collections.IEnumerable with
-    member _.GetEnumerator () =
-      memtbl.GetEnumerator () :> Collections.IEnumerator
+    member _.Count = memtbl.Count
 
-  member _.Count = lock lockObj (fun () -> memtbl.Count)
+    /// <summary>
+    /// Add or update a key-value pair in Memtbl.
+    /// Single-threaded implementation optimized for performance.
+    /// </summary>
+    /// <param name="key">The key to add or update.</param>
+    /// <param name="valueLocation">The value location to associate with the key.</param>
+    member _.Add(key: byte array, valueLocation: ValueLocation) : unit = memtbl[key] <- valueLocation
 
-  /// <summary>
-  /// Add or update a key-value pair in Memtbl.
-  /// Thread-safe implementation using locks.
-  /// </summary>
-  /// <param name="key">The key to add or update.</param>
-  /// <param name="valueLocation">The value location to associate with the key.</param>
-  member _.Add (key : byte array, valueLocation : ValueLocation) : unit =
-    lock lockObj (fun () -> memtbl[key] <- valueLocation)
+    /// <summary>
+    /// Get the value location of the given key from Memtbl.
+    /// Single-threaded implementation optimized for performance.
+    /// </summary>
+    /// <param name="key">The key to find.</param>
+    /// <returns>
+    /// An Option type: Some ValueLocation if the key is found, otherwise None.
+    /// This follows the idiomatic way of handling possible missing values in F#.
+    /// </returns>
+    member _.TryGet(key: byte array) : ValueLocation option =
+        match memtbl.TryGetValue key with
+        | true, value -> Some value
+        | false, _ -> None
 
-  /// <summary>
-  /// Get the value location of the given key from Memtbl.
-  /// Thread-safe implementation using locks.
-  /// </summary>
-  /// <param name="key">The key to find.</param>
-  /// <returns>
-  /// An Option type: Some ValueLocation if the key is found, otherwise None.
-  /// This follows the idiomatic way of handling possible missing values in F#.
-  /// </returns>
-  member _.TryGet (key : byte array) : ValueLocation option =
-    lock lockObj (fun () ->
-      match memtbl.TryGetValue key with
-      | true, value -> Some value
-      | false, _ -> None)
+    /// <summary>
+    /// Delete a key from Memtbl.
+    /// In LSM-Tree structure, deletion operations are usually not immediately removing data,
+    /// but instead inserting a record with a special value location (e.g., -1) to represent deletion.
+    /// This "deletion marker" will be recognized and removed in subsequent Compaction processes.
+    /// Single-threaded implementation optimized for performance.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    /// <returns>The updated Memtbl instance, which contains a deletion marker record.</returns>
+    member this.SafeDelete(key: byte array) : unit =
+        match this.TryGet key with
+        | Some _ ->
+            match memtbl.Remove key with
+            | true -> memtbl.Add(key, -1L)
+            | false -> failwith "Failed to delete key"
+        | None -> failwith "Key not found"
 
-  /// <summary>
-  /// Delete a key from Memtbl.
-  /// In LSM-Tree structure, deletion operations are usually not immediately removing data,
-  /// but instead inserting a record with a special value location (e.g., -1) to represent deletion.
-  /// This "deletion marker" will be recognized and removed in subsequent Compaction processes.
-  /// Thread-safe implementation using locks.
-  /// </summary>
-  /// <param name="key">The key to delete.</param>
-  /// <returns>The updated Memtbl instance, which contains a deletion marker record.</returns>
-  member this.SafeDelete (key : byte array) : unit =
-    lock lockObj (fun () ->
-      match this.TryGet key with
-      | Some _ ->
-        match memtbl.Remove key with
-        | true -> memtbl.Add (key, -1L)
-        | false -> failwith "Failed to delete key"
-      | None -> failwith "Key not found")
-
-  /// <summary>
-  /// Delete a key from Memtbl.
-  /// Thread-safe implementation using locks.
-  /// </summary>
-  /// <param name="key">The key to delete.</param>
-  member _.Delete (key : byte array) : unit =
-    lock lockObj (fun () -> memtbl[key] <- -1L)
+    /// <summary>
+    /// Delete a key from Memtbl.
+    /// Single-threaded implementation optimized for performance.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    member _.Delete(key: byte array) : unit = memtbl[key] <- -1L

@@ -6,4 +6,4 @@ open NUnit.Framework
 let Setup () = ()
 
 [<Test>]
-let Test1 () = Assert.Pass ()
+let Test1 () = Assert.Pass()
