@@ -114,7 +114,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                 try
                     w.Dispose()
                 with e ->
-                    failwith $"Failed to dispose writer: {e.Message}"
+                    Logger.Warn $"Failed to dispose writer: {e.Message}"
 
             match reader with
             | null -> ()
@@ -122,7 +122,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                 try
                     r.Dispose()
                 with e ->
-                    failwith $"Failed to dispose reader: {e.Message}"
+                    Logger.Warn $"Failed to dispose reader: {e.Message}"
 
             match fileStream with
             | null -> ()
@@ -130,7 +130,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                 try
                     fs.Dispose()
                 with e ->
-                    failwith $"Failed to dispose file stream: {e.Message}"
+                    Logger.Warn $"Failed to dispose file stream: {e.Message}"
 
             Error $"Failed to open or create Value Log file '{path}': {ex.Message}"
 

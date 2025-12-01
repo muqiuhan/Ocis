@@ -55,7 +55,7 @@ type SimpleTests() =
 
                 let value = Encoding.UTF8.GetBytes($"mem_value_{i}_" + new string ('C', 200))
 
-                db.Set(key, value)  |> ignore
+                db.Set(key, value) |> ignore
 
             printfn "Getting 100000 entries for Memory Footprint test..."
 
@@ -64,7 +64,7 @@ type SimpleTests() =
 
                 let value = Encoding.UTF8.GetBytes($"mem_value_{i}_" + new string ('C', 200))
 
-                match db.Get key  with
+                match db.Get key with
                 | Ok None -> failwith $"Failed to get key {i}"
                 | Ok(Some value') ->
                     if value <> value' then

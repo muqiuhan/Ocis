@@ -47,7 +47,12 @@ type SSTblTests() =
         let level = 0
 
         // execute Flush
-        let filePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+        let filePath =
+            match SSTbl.Flush(memtbl, testFilePath, timestamp, level) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         // verify the file exists
         Assert.That(File.Exists filePath, Is.True, "SSTable file should be created.")
@@ -56,7 +61,9 @@ type SSTblTests() =
         use sstbl =
             match SSTbl.Open filePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable after flush."
+            | None ->
+                Assert.Fail "Failed to open SSTable after flush."
+                failwith "unreachable"
 
         Assert.That(sstbl.Timestamp, Is.EqualTo timestamp, "Timestamp should match.")
 
@@ -89,14 +96,21 @@ type SSTblTests() =
         let timestamp = 987654321L
         let level = 1
 
-        let filePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+        let filePath =
+            match SSTbl.Flush(memtbl, testFilePath, timestamp, level) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush empty SSTable: {err}"
+                ""
 
         Assert.That(File.Exists filePath, Is.True, "Empty SSTable file should still be created.")
 
         use sstbl =
             match SSTbl.Open filePath with
             | Some s -> s
-            | None -> failwith "Failed to open empty SSTable."
+            | None ->
+                Assert.Fail "Failed to open empty SSTable."
+                failwith "unreachable"
 
         Assert.That(sstbl.Timestamp, Is.EqualTo timestamp, "Timestamp should match.")
 
@@ -120,13 +134,20 @@ type SSTblTests() =
         let level = 2
 
         // first Flush to create file
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, timestamp, level) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         // then Open to read file
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         Assert.That(sstbl.Path, Is.EqualTo testFilePath, "Path should match.")
 
@@ -151,12 +172,20 @@ type SSTblTests() =
     member this.TryGet_ShouldReturnSomeForExistingKey() =
         let memtbl = createMemtbl 5
         memtbl.Add(Encoding.UTF8.GetBytes "test_key", 999L)
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         let key = Encoding.UTF8.GetBytes "key0002"
         let result = sstbl.TryGet key
@@ -173,12 +202,20 @@ type SSTblTests() =
     [<Test>]
     member this.TryGet_ShouldReturnNoneForNonExistingKey() =
         let memtbl = createMemtbl 5
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         let key = Encoding.UTF8.GetBytes "non_existent_key"
         let result = sstbl.TryGet key
@@ -189,14 +226,24 @@ type SSTblTests() =
         let memtbl = Memtbl()
         let keyToDelete = Encoding.UTF8.GetBytes "key_to_delete"
         memtbl.Add(keyToDelete, 100L)
-        memtbl.SafeDelete keyToDelete // this will write a -1L marker in Memtbl
 
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
+        match memtbl.SafeDelete keyToDelete with
+        | Ok() -> () // this will write a -1L marker in Memtbl
+        | Error err -> Assert.Fail $"Failed to delete key: {err}"
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         let result = sstbl.TryGet keyToDelete
         Assert.That(result.IsSome, Is.True, "Should find the deletion marker key.")
@@ -206,12 +253,20 @@ type SSTblTests() =
     [<Test>]
     member this.TryGet_ShouldReturnNoneForKeysOutsideRange() =
         let memtbl = createMemtbl 5 // key0000 to key0004
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         let keyTooLow = Encoding.UTF8.GetBytes "aaaaa" // less than key0000
         let keyTooHigh = Encoding.UTF8.GetBytes "zzzzz" // greater than key0004
@@ -223,12 +278,20 @@ type SSTblTests() =
     [<Test>]
     member this.TryGet_ShouldWorkWithBoundaryKeys() =
         let memtbl = createMemtbl 5 // key0000 to key0004
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         // Test LowKey
         let lowKey = Encoding.UTF8.GetBytes "key0000"
@@ -249,12 +312,20 @@ type SSTblTests() =
         let memtbl = createMemtbl 5 // key0000 -> 0L, key0001 -> 1L, ..., key0004 -> 4L
         let timestamp = 0L
         let level = 0
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, timestamp, level) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable for enumeration test."
+            | None ->
+                Assert.Fail "Failed to open SSTable for enumeration test."
+                failwith "unreachable"
 
         let mutable expectedIdx = 0
 
@@ -284,12 +355,20 @@ type SSTblTests() =
         let memtbl = createMemtbl 5 // key0000 -> 0L, key0001 -> 1L, ..., key0004 -> 4L
         let timestamp = 0L
         let level = 0
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, timestamp, level)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, timestamp, level) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         use sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable for enumeration test."
+            | None ->
+                Assert.Fail "Failed to open SSTable for enumeration test."
+                failwith "unreachable"
 
         let mutable expectedIdx = 0
 
@@ -316,12 +395,20 @@ type SSTblTests() =
     [<Test>]
     member this.Dispose_ShouldCloseFileStream() =
         let memtbl = createMemtbl 1
-        let testFilePath = SSTbl.Flush(memtbl, testFilePath, 0L, 0)
+
+        let testFilePath =
+            match SSTbl.Flush(memtbl, testFilePath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush SSTable: {err}"
+                ""
 
         let sstbl =
             match SSTbl.Open testFilePath with
             | Some s -> s
-            | None -> failwith "Failed to open SSTable."
+            | None ->
+                Assert.Fail "Failed to open SSTable."
+                failwith "unreachable"
 
         // Explicitly dispose of the SSTbl object
         sstbl.FileStream.Dispose()
