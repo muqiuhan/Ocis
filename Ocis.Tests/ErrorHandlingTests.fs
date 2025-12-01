@@ -63,32 +63,36 @@ type ErrorHandlingTests() =
         let memtbl = null
         let path = Path.Combine(tempDir, "test_null_memtbl.sst")
 
-        Assert.Throws<System.Exception>(fun () -> SSTbl.Flush(memtbl, path, 0L, 0) |> ignore)
-        |> ignore
+        match SSTbl.Flush(memtbl, path, 0L, 0) with
+        | Ok _ -> Assert.Fail "Expected error for null memtbl"
+        | Error err -> Assert.That(err.ToString(), Does.Contain "null", "Error should indicate null memtbl")
 
     [<Test>]
     member this.SSTableFlush_ShouldHandleNullPath() =
         let memtbl = Memtbl()
         let path: string = Unchecked.defaultof<string>
 
-        Assert.Throws<System.Exception>(fun () -> SSTbl.Flush(memtbl, path, 0L, 0) |> ignore)
-        |> ignore
+        match SSTbl.Flush(memtbl, path, 0L, 0) with
+        | Ok _ -> Assert.Fail "Expected error for null path"
+        | Error err -> Assert.That(err.ToString(), Does.Contain "path", "Error should indicate invalid path")
 
     [<Test>]
     member this.SSTableFlush_ShouldHandleEmptyPath() =
         let memtbl = Memtbl()
         let path = ""
 
-        Assert.Throws<System.Exception>(fun () -> SSTbl.Flush(memtbl, path, 0L, 0) |> ignore)
-        |> ignore
+        match SSTbl.Flush(memtbl, path, 0L, 0) with
+        | Ok _ -> Assert.Fail "Expected error for empty path"
+        | Error err -> Assert.That(err.ToString(), Does.Contain "path", "Error should indicate invalid path")
 
     [<Test>]
     member this.SSTableFlush_ShouldHandleInvalidLevel() =
         let memtbl = Memtbl()
         let path = Path.Combine(tempDir, "test_invalid_level.sst")
 
-        Assert.Throws<System.Exception>(fun () -> SSTbl.Flush(memtbl, path, 0L, -1) |> ignore)
-        |> ignore
+        match SSTbl.Flush(memtbl, path, 0L, -1) with
+        | Ok _ -> Assert.Fail "Expected error for invalid level"
+        | Error err -> Assert.That(err.ToString(), Does.Contain "level", "Error should indicate invalid level")
 
     [<Test>]
     member this.SSTableFlush_ShouldHandlePathTooLong() =
@@ -96,14 +100,11 @@ type ErrorHandlingTests() =
         // Create a path that's too long
         let longPath = Path.Combine(tempDir, String('x', 500) + ".sst")
 
-        try
-            SSTbl.Flush(memtbl, longPath, 0L, 0) |> ignore
-            // If it succeeds, that's also fine - depends on the filesystem
-            ()
-        with
-        | :? System.IO.PathTooLongException -> ()
-        | :? System.IO.IOException -> () // Some filesystems may throw IOException instead
-        | _ -> ()
+        match SSTbl.Flush(memtbl, longPath, 0L, 0) with
+        | Ok _ -> () // If it succeeds, that's also fine - depends on the filesystem
+        | Error err ->
+            // May fail with I/O error or path too long error
+            Assert.That(err.ToString(), Does.Contain "error", "Error should indicate I/O or path issue")
 
     [<Test>]
     member this.SSTableFlush_ShouldHandleDirectoryNotFound() =
@@ -111,8 +112,9 @@ type ErrorHandlingTests() =
         let invalidDir = Path.Combine(tempDir, "nonexistent_dir")
         let path = Path.Combine(invalidDir, "test.sst")
 
-        Assert.Throws<System.IO.DirectoryNotFoundException>(fun () -> SSTbl.Flush(memtbl, path, 0L, 0) |> ignore)
-        |> ignore
+        match SSTbl.Flush(memtbl, path, 0L, 0) with
+        | Ok _ -> Assert.Fail "Expected error for non-existent directory"
+        | Error err -> Assert.That(err.ToString(), Does.Contain "error", "Error should indicate I/O issue")
 
     [<Test>]
     member this.SSTableFlush_ShouldHandleAccessDenied() =
@@ -121,12 +123,19 @@ type ErrorHandlingTests() =
         let systemPath = "/root/test.sst"
 
         if not (System.IO.File.Exists systemPath) then
-            try
-                SSTbl.Flush(memtbl, systemPath, 0L, 0) |> ignore
-                () // If it succeeds, that's also fine
-            with
-            | :? System.UnauthorizedAccessException -> ()
-            | _ -> ()
+            match SSTbl.Flush(memtbl, systemPath, 0L, 0) with
+            | Ok _ -> () // If it succeeds, that's also fine
+            | Error err ->
+                // May fail with unauthorized access error
+                let errorMsg = err.ToString()
+
+                Assert.That(
+                    errorMsg.Contains "Access denied"
+                    || errorMsg.Contains "error"
+                    || errorMsg.Contains "denied",
+                    Is.True,
+                    $"Error should indicate access issue, got: {errorMsg}"
+                )
 
     [<Test>]
     member this.SSTableFlush_ShouldHandleEmptyMemtbl() =
@@ -134,7 +143,12 @@ type ErrorHandlingTests() =
         let path = Path.Combine(tempDir, "test_empty.sst")
 
         // Should not throw exception
-        let resultPath = SSTbl.Flush(memtbl, path, 0L, 0)
+        let resultPath =
+            match SSTbl.Flush(memtbl, path, 0L, 0) with
+            | Ok p -> p
+            | Error err ->
+                Assert.Fail $"Failed to flush empty SSTable: {err}"
+                ""
 
         Assert.That(File.Exists resultPath, Is.True)
         Assert.That(resultPath, Is.EqualTo path)
@@ -204,7 +218,10 @@ type ErrorHandlingTests() =
             memtbl.Add(Encoding.UTF8.GetBytes "test", 100L)
 
             let sstPath = Path.Combine(dbPath, "sstbl-test.sst")
-            SSTbl.Flush(memtbl, sstPath, 0L, 0) |> ignore
+
+            match SSTbl.Flush(memtbl, sstPath, 0L, 0) with
+            | Ok _ -> ()
+            | Error err -> Assert.Fail $"Failed to flush SSTable: {err}"
 
             // Close the DB
             (db :> IDisposable).Dispose()
@@ -238,7 +255,10 @@ type ErrorHandlingTests() =
             memtbl.Add(Encoding.UTF8.GetBytes $"key{i:D3}", int64 i)
 
         let sstPath = Path.Combine(tempDir, "concurrent_test.sst")
-        SSTbl.Flush(memtbl, sstPath, 0L, 0) |> ignore
+
+        match SSTbl.Flush(memtbl, sstPath, 0L, 0) with
+        | Ok _ -> ()
+        | Error err -> Assert.Fail $"Failed to flush SSTable: {err}"
 
         // Test concurrent reads
         let concurrentReads () =
@@ -285,7 +305,13 @@ type ErrorHandlingTests() =
             memtbl.Add(key, int64 i)
 
         let sstPath = Path.Combine(tempDir, "large_sstable.sst")
-        let flushedPath = SSTbl.Flush(memtbl, sstPath, 0L, 0)
+
+        let flushedPath =
+            match SSTbl.Flush(memtbl, sstPath, 0L, 0) with
+            | Ok path -> path
+            | Error err ->
+                Assert.Fail $"Failed to flush large SSTable: {err}"
+                ""
 
         Assert.That(File.Exists flushedPath, Is.True)
 

@@ -57,21 +57,21 @@ type MemtblTests() =
         let value = 40L
         memtbl.Add(key, value)
 
-        memtbl.SafeDelete key
+        match memtbl.SafeDelete key with
+        | Ok() -> ()
+        | Error err -> Assert.Fail $"Failed to delete key: {err}"
 
         let result = memtbl.TryGet key
         Assert.That(result.IsSome, Is.True)
         Assert.That(result.Value, Is.EqualTo -1L)
 
     [<Test>]
-    member this.SafeDelete_ShouldThrowExceptionForNonExistingKey() =
+    member this.SafeDelete_ShouldReturnErrorForNonExistingKey() =
         let key = Encoding.UTF8.GetBytes "another_nonexistent_key"
 
-        try
-            memtbl.SafeDelete key
-            Assert.Fail "Expected an exception to be thrown but none was."
-        with _ -> // Catch any exception
-            Assert.Pass()
+        match memtbl.SafeDelete key with
+        | Ok() -> Assert.Fail "Expected an error but got Ok"
+        | Error err -> Assert.That(err.ToString(), Does.Contain "Key not found", "Error should indicate key not found")
 
     [<Test>]
     member this.ByteArrayComparer_ShouldHandleDifferentLengths() =

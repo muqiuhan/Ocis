@@ -4,6 +4,7 @@ open Ocis.Memtbl
 open Ocis.Utils.ByteArrayComparer
 open Ocis.Utils.Serialization
 open Ocis.ValueLocation
+open Ocis.Errors
 open System.IO
 open System.Collections.Generic
 open System.Collections
@@ -89,102 +90,118 @@ type SSTbl
     /// <param name="path">The path of the new SSTable file.</param>
     /// <param name="timestamp">The creation timestamp of the SSTable.</param>
     /// <param name="level">The compression level of the SSTable.</param>
-    /// <returns>The path of the created SSTable file.</returns>
-    static member Flush(memtbl: Memtbl | null, path: string, timestamp: int64, level: int) : string =
+    /// <returns>A Result: Ok path if successful, otherwise an Error OcisError.</returns>
+    static member Flush(memtbl: Memtbl | null, path: string, timestamp: int64, level: int) : Result<string, OcisError> =
         try
             if obj.ReferenceEquals(memtbl, null) then
-                failwith "Memtbl cannot be null"
+                Error NullMemtbl
+            elif System.String.IsNullOrWhiteSpace path then
+                Error(InvalidSSTablePath path)
+            elif level < 0 then
+                Error(InvalidSSTableLevel level)
+            else
 
-            if System.String.IsNullOrWhiteSpace path then
-                failwith "Path cannot be null or empty"
+                Logger.Debug $"Flushing Memtbl with {memtbl.Count} entries to SSTable: {path}"
 
-            if level < 0 then
-                failwith $"Invalid level: {level}"
+                use fileStream =
+                    new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)
 
-            Logger.Debug $"Flushing Memtbl with {memtbl.Count} entries to SSTable: {path}"
+                use writer = new BinaryWriter(fileStream)
 
-            use fileStream =
-                new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)
+                // Pre-allocate capacity based on memtbl size to reduce allocations
+                let memtblCount = memtbl.Count
 
-            use writer = new BinaryWriter(fileStream)
+                if memtblCount = 0 then
+                    Logger.Warn "Flushing empty Memtbl to SSTable"
 
-            // Pre-allocate capacity based on memtbl size to reduce allocations
-            let memtblCount = memtbl.Count
+                let recordOffsets = Array.zeroCreate<int64> memtblCount
+                let mutable recordIndex = 0
+                let mutable currentLowKey: byte array = null
+                let mutable currentHighKey: byte array = null
 
-            if memtblCount = 0 then
-                Logger.Warn "Flushing empty Memtbl to SSTable"
+                // 1. Write data block (Data Block)
+                let mutable writeError: OcisError option = None
 
-            let recordOffsets = Array.zeroCreate<int64> memtblCount
-            let mutable recordIndex = 0
-            let mutable currentLowKey: byte array = null
-            let mutable currentHighKey: byte array = null
+                memtbl
+                |> Seq.iter (fun (KeyValue(key, valueLocation)) ->
+                    if writeError.IsNone then
+                        if currentLowKey = null then // Record the first key as LowKey
+                            currentLowKey <- key
 
-            // 1. Write data block (Data Block)
-            memtbl
-            |> Seq.iter (fun (KeyValue(key, valueLocation)) ->
-                if currentLowKey = null then // Record the first key as LowKey
-                    currentLowKey <- key
+                        currentHighKey <- key // Update HighKey to the current key on each iteration
 
-                currentHighKey <- key // Update HighKey to the current key on each iteration
+                        if recordIndex >= memtblCount then
+                            writeError <- Some(SSTableRecordIndexOutOfRange(recordIndex, memtblCount))
+                        else
+                            recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
+                            recordIndex <- recordIndex + 1
+                            Serialization.writeByteArray writer key
+                            Serialization.writeValueLocation writer valueLocation)
 
-                if recordIndex >= memtblCount then
-                    failwith $"Record index {recordIndex} exceeded expected count {memtblCount}"
+                match writeError with
+                | Some error -> Error error
+                | None ->
+                    // Handle empty Memtbl cases, ensure LowKey and HighKey are not null
+                    let actualLowKey = currentLowKey |> Option.ofObj |> Option.defaultValue [||]
 
-                recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
-                recordIndex <- recordIndex + 1
-                Serialization.writeByteArray writer key
-                Serialization.writeValueLocation writer valueLocation)
+                    let actualHighKey = currentHighKey |> Option.ofObj |> Option.defaultValue [||]
 
-            // Handle empty Memtbl cases, ensure LowKey and HighKey are not null
-            let actualLowKey = currentLowKey |> Option.ofObj |> Option.defaultValue [||]
+                    // Validate that we wrote the expected number of records
+                    if recordIndex <> memtblCount then
+                        Error(SSTableRecordCountMismatch(memtblCount, recordIndex))
+                    else
+                        // 2. Write index block (Index Block)
+                        // The starting offset of the index block
+                        let indexBlockStartOffset = fileStream.Position
 
-            let actualHighKey = currentHighKey |> Option.ofObj |> Option.defaultValue [||]
+                        for offset in recordOffsets do
+                            writer.Write offset // Write the offset of each key-value pair
 
-            // Validate that we wrote the expected number of records
-            if recordIndex <> memtblCount then
-                failwith $"Record count mismatch: wrote {recordIndex} but expected {memtblCount}"
+                        // 3. Write footer/metadata block (Footer/Metadata Block)
+                        // The starting offset of the footer
+                        let footerStartOffset = fileStream.Position
+                        writer.Write timestamp
+                        writer.Write level
+                        Serialization.writeByteArray writer actualLowKey
+                        Serialization.writeByteArray writer actualHighKey
+                        writer.Write indexBlockStartOffset // Write the starting offset of the index block
+                        writer.Write recordIndex // Write the number of entries in the index block
+                        let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
+                        writer.Write(footerSize |> int32) // Write the total size of the footer (int32)
 
-            // 2. Write index block (Index Block)
-            // The starting offset of the index block
-            let indexBlockStartOffset = fileStream.Position
+                        // Force flush to ensure data is written to disk
+                        writer.Flush()
+                        fileStream.Flush(true) // Force flush to disk
 
-            for offset in recordOffsets do
-                writer.Write offset // Write the offset of each key-value pair
+                        Logger.Debug
+                            $"Successfully flushed SSTable: {path} (records: {recordIndex}, size: {fileStream.Length} bytes)"
 
-            // 3. Write footer/metadata block (Footer/Metadata Block)
-            // The starting offset of the footer
-            let footerStartOffset = fileStream.Position
-            writer.Write timestamp
-            writer.Write level
-            Serialization.writeByteArray writer actualLowKey
-            Serialization.writeByteArray writer actualHighKey
-            writer.Write indexBlockStartOffset // Write the starting offset of the index block
-            writer.Write recordIndex // Write the number of entries in the index block
-            let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
-            writer.Write(footerSize |> int32) // Write the total size of the footer (int32)
-
-            // Force flush to ensure data is written to disk
-            writer.Flush()
-            fileStream.Flush(true) // Force flush to disk
-
-            Logger.Debug
-                $"Successfully flushed SSTable: {path} (records: {recordIndex}, size: {fileStream.Length} bytes)"
-
-            path // Return the path of the generated SSTable file
+                        Ok path // Return the path of the generated SSTable file
 
         with
         | :? System.IO.IOException as ioEx ->
             Logger.Error $"I/O error during SSTable flush to '{path}': {ioEx.Message}"
-            reraise ()
+            Error(IOError("SSTable flush", path, ioEx.Message))
         | :? System.UnauthorizedAccessException ->
             Logger.Error $"Access denied during SSTable flush to '{path}'"
-            reraise ()
+            Error(UnauthorizedAccess path)
+        | ex when ex.Message.Contains "Record index" ->
+            let parts =
+                ex.Message.Split([| "exceeded expected count" |], System.StringSplitOptions.None)
+
+            if parts.Length >= 2 then
+                let indexStr = parts[0].Replace("Record index", "").Trim()
+                let countStr = parts[1].Trim()
+
+                match System.Int32.TryParse indexStr, System.Int32.TryParse countStr with
+                | (true, index), (true, count) -> Error(SSTableRecordIndexOutOfRange(index, count))
+                | _ -> Error(SSTableFlushError(path, ex.Message))
+            else
+                Error(SSTableFlushError(path, ex.Message))
         | ex ->
             Logger.Error $"Exception type: {ex.GetType().FullName}"
-
             Logger.Error $"Unexpected error during SSTable flush to '{path}': {ex.Message}"
-
-            reraise ()
+            Error(SSTableFlushError(path, ex.Message))
 
     /// <summary>
     /// Open an existing SSTable file and load its metadata and in-memory index.

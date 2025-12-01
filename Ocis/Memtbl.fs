@@ -4,6 +4,7 @@ open System
 open System.Collections.Generic
 open Ocis.Utils.ByteArrayComparer
 open Ocis.ValueLocation
+open Ocis.Errors
 
 /// <summary>
 /// Memtbl (Memory Table) represents the memory buffer in WiscKey storage engine.
@@ -61,14 +62,16 @@ type Memtbl() =
     /// Single-threaded implementation optimized for performance.
     /// </summary>
     /// <param name="key">The key to delete.</param>
-    /// <returns>The updated Memtbl instance, which contains a deletion marker record.</returns>
-    member this.SafeDelete(key: byte array) : unit =
+    /// <returns>A Result: Ok unit if successful, otherwise an Error OcisError.</returns>
+    member this.SafeDelete(key: byte array) : Result<unit, OcisError> =
         match this.TryGet key with
         | Some _ ->
             match memtbl.Remove key with
-            | true -> memtbl.Add(key, -1L)
-            | false -> failwith $"Failed to delete key: {key}"
-        | None -> failwith $"Key not found: ${key}"
+            | true ->
+                memtbl.Add(key, -1L)
+                Ok()
+            | false -> Error(DeleteOperationFailed(key, "Failed to remove key from dictionary"))
+        | None -> Error(KeyNotFound key)
 
     /// <summary>
     /// Delete a key from Memtbl.

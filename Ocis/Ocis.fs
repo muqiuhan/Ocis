@@ -287,7 +287,14 @@ type OcisDB
     interface IDisposable with
         member this.Dispose() =
             // Flush WAL before closing to ensure all data is persisted
-            this.WAL.Flush()
+            // Check if file stream is still open before flushing
+            try
+                if this.WAL.FileStream.CanWrite then
+                    this.WAL.Flush()
+            with
+            | :? System.ObjectDisposedException -> () // Already disposed, skip flush
+            | _ -> () // Ignore other errors during disposal
+
             // Close file streams
             this.ValueLog.Close()
             this.WAL.Close()
@@ -423,18 +430,19 @@ type OcisDB
                 Logger.Debug $"Flushing {entries.Length} entries to SSTable at level {targetLevel}"
 
                 // Flush to disk
-                let flushedSSTblPath =
-                    SSTbl.Flush(mergedMemtbl, newSSTblPath, timestamp, targetLevel)
-
-                // Open and validate the new SSTable
-                match SSTbl.Open flushedSSTblPath with
-                | Some newSSTbl ->
-                    Logger.Debug $"Successfully created merged SSTable: {newSSTbl.Path}"
-                    Ok(Some newSSTbl, entries)
-                | None ->
-                    Logger.Error $"Failed to open newly created SSTable: {flushedSSTblPath}"
-
-                    Error $"Failed to open newly merged SSTable at {flushedSSTblPath}"
+                match SSTbl.Flush(mergedMemtbl, newSSTblPath, timestamp, targetLevel) with
+                | Ok flushedSSTblPath ->
+                    // Open and validate the new SSTable
+                    match SSTbl.Open flushedSSTblPath with
+                    | Some newSSTbl ->
+                        Logger.Debug $"Successfully created merged SSTable: {newSSTbl.Path}"
+                        Ok(Some newSSTbl, entries)
+                    | None ->
+                        Logger.Error $"Failed to open newly created SSTable: {flushedSSTblPath}"
+                        Error $"Failed to open newly merged SSTable at {flushedSSTblPath}"
+                | Error err ->
+                    Logger.Error $"Failed to flush merged SSTable: {err}"
+                    Error $"Failed to flush merged SSTable: {err}"
             with ex ->
                 Logger.Error $"Error creating merged SSTable: {ex.Message}"
                 Error $"Error creating merged SSTable: {ex.Message}"
@@ -477,12 +485,14 @@ type OcisDB
                 let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 let level = sstbl.Level // Keep the same level
 
-                let flushedSSTblPath =
-                    SSTbl.Flush(recompactedMemtbl, newSSTblPath, timestamp, level)
-
-                match SSTbl.Open flushedSSTblPath with
-                | Some newSSTbl -> Ok(Some newSSTbl)
-                | None -> Error $"Failed to open recompacted SSTable at {flushedSSTblPath}"
+                match SSTbl.Flush(recompactedMemtbl, newSSTblPath, timestamp, level) with
+                | Ok flushedSSTblPath ->
+                    match SSTbl.Open flushedSSTblPath with
+                    | Some newSSTbl -> Ok(Some newSSTbl)
+                    | None -> Error $"Failed to open recompacted SSTable at {flushedSSTblPath}"
+                | Error err ->
+                    Logger.Error $"Failed to flush recompacted SSTable: {err}"
+                    Error $"Failed to flush recompacted SSTable: {err}"
             else
                 Ok None // No changes, no new SSTbl needed. Or all entries were deletion markers and didn't get added.
         with ex ->
@@ -765,9 +775,8 @@ type OcisDB
         let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         let level = 0 // Always flush to Level 0
 
-        try
-            let flushedSSTblPath = SSTbl.Flush(memtblToFlush, newSSTblPath, timestamp, level)
-
+        match SSTbl.Flush(memtblToFlush, newSSTblPath, timestamp, level) with
+        | Ok flushedSSTblPath ->
             match SSTbl.Open flushedSSTblPath with
             | Some sstbl ->
                 // Update the SSTables map in the OcisDB instance
@@ -781,8 +790,7 @@ type OcisDB
                 // After flushing, trigger compaction if needed
                 this.PerformCompaction()
             | None -> Logger.Error $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
-        with ex ->
-            Logger.Error $"Error flushing Memtable to SSTable: {ex.Message}"
+        | Error err -> Logger.Error $"Error flushing Memtable to SSTable: {err}"
 
     /// <summary>
     /// Background agent for handling Garbage Collection in Valog with enhanced features.
