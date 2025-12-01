@@ -503,7 +503,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     /// </summary>
     static member CollectGarbage
         (valog: Valog, liveLocations: Set<int64>)
-        : Async<Result<Valog * Map<int64, int64>, string> option> =
+        : Async<Result<Valog * Map<int64, int64>, string>> =
         async {
             Logger.Info $"Starting legacy synchronous Valog GC for {liveLocations.Count} live locations"
 
@@ -519,18 +519,18 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
             match result with
             | Ok(state, Some newValog) when state.IsCompleted ->
                 Logger.Info "Legacy Valog GC completed successfully"
-                return Some(Ok(newValog, state.RemappedLocations))
-            | Ok(state, None) when not state.IsCompleted -> // Explicitly handle the case where GC is not completed
+                return Ok(newValog, state.RemappedLocations)
+            | Ok(state, None) when not state.IsCompleted ->
+                // This should not happen in legacy mode with unlimited batch settings
                 Logger.Warn "Incremental GC did not complete in single batch (legacy mode)"
-
-                return Some(Error "GC did not complete as expected")
-            | Error msg -> // Handle the error case
+                return Error "GC did not complete as expected"
+            | Error msg ->
                 Logger.Error $"Legacy GC failed: {msg}"
-                return Some(Error msg)
-            | _ -> // Catch-all for any other unexpected cases
+                return Error msg
+            | _ ->
+                // Catch-all for any other unexpected cases
                 Logger.Error "Unexpected result from CollectGarbageIncremental in legacy GC mode"
-
-                return Some(Error "Unexpected GC result")
+                return Error "Unexpected GC result"
         }
 
     /// <summary>
