@@ -286,6 +286,8 @@ type OcisDB
     // Implement IDisposable for OcisDB to ensure all underlying resources are properly closed
     interface IDisposable with
         member this.Dispose() =
+            // Flush WAL before closing to ensure all data is persisted
+            this.WAL.Flush()
             // Close file streams
             this.ValueLog.Close()
             this.WAL.Close()
@@ -754,6 +756,10 @@ type OcisDB
     /// Flushes a memtable to SSTable synchronously.
     /// </summary>
     member this.FlushMemtableToSSTable(memtblToFlush: Memtbl) : unit =
+        // Ensure WAL is flushed to disk before flushing memtable to SSTable
+        // This guarantees durability: if system crashes, WAL can be replayed to recover data
+        wal.Flush()
+
         let newSSTblPath = Path.Combine(this.Dir, $"sstbl-{Guid.NewGuid().ToString()}.sst")
 
         let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
