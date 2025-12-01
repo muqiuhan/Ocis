@@ -1175,25 +1175,46 @@ type OcisDB
                                 true)
 
                     if stillInvalid then
-                        // Retry logic with exponential backoff
-                        let rec retryOpen attempts =
-                            if attempts >= 10 then // Increased from 5 to 10
-                                Logger.Error $"Failed to reopen Valog after {attempts} attempts"
-
-                                Error $"Failed to reopen Valog after {attempts} attempts"
+                        // Wait for file to become available before attempting to open
+                        // This handles cases where file handles haven't been released yet
+                        let rec waitForFile attempts =
+                            if attempts >= 20 then // Maximum 20 attempts (about 1 second total)
+                                Error "File not available after maximum wait time"
                             else
-                                match Valog.Create valogPath with
-                                | Ok newValog ->
-                                    this.ValueLog <- newValog
-                                    Logger.Info "Valog reopened successfully after GC"
-                                    Ok()
-                                | Error msg ->
-                                    Logger.Warn $"Failed to reopen Valog (attempt {attempts + 1}): {msg}"
-                                    // Wait before retry with longer exponential backoff
-                                    System.Threading.Thread.Sleep(200 * (1 <<< attempts)) // Increased from 100ms
-                                    retryOpen (attempts + 1)
+                                try
+                                    // Try to open the file with exclusive access to verify it's available
+                                    use testStream =
+                                        new FileStream(valogPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
 
-                        retryOpen 0
+                                    if testStream.CanRead && testStream.CanWrite then
+                                        Ok() // File is available
+                                    else
+                                        System.Threading.Thread.Sleep 50
+                                        waitForFile (attempts + 1)
+                                with
+                                | :? IOException ->
+                                    // File is still locked, wait and retry
+                                    System.Threading.Thread.Sleep 50
+                                    waitForFile (attempts + 1)
+                                | ex ->
+                                    // Other error, try to open anyway
+                                    waitForFile (attempts + 1)
+
+                        // Wait for file to be available
+                        match waitForFile 0 with
+                        | Ok() ->
+                            // File is available, now try to open it
+                            match Valog.Create valogPath with
+                            | Ok newValog ->
+                                this.ValueLog <- newValog
+                                Logger.Info "Valog reopened successfully after GC"
+                                Ok()
+                            | Error msg ->
+                                Logger.Error $"Failed to reopen Valog after file became available: {msg}"
+                                Error $"Failed to reopen Valog: {msg}"
+                        | Error msg ->
+                            Logger.Error $"Valog file not available: {msg}"
+                            Error msg
                     else
                         Ok())
             else
