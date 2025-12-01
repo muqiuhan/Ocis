@@ -10,6 +10,7 @@ open System.Text
 open Ocis.ValueLocation
 open FSharp.Collections
 open Ocis.Utils.Logger
+open Ocis.Errors
 
 // Compaction strategy types - simplified for single-threaded operation
 type CompactionPriority =
@@ -362,17 +363,19 @@ type OcisDB
         : (byte array * ValueLocation) list =
         Logger.Debug $"Merging and deduplicating {allEntries.Length} entries"
 
-        let mutable processedKeys = Set.empty<byte array>
-        let mutable mergedEntries = []
-
-        for key, valueLoc, _ in allEntries do
-            if not (processedKeys.Contains key) then
-                // First occurrence of this key (due to descending timestamp sort)
-                mergedEntries <- (key, valueLoc) :: mergedEntries
-                processedKeys <- processedKeys.Add key
-
-        // Reverse to maintain key order
-        List.rev mergedEntries
+        // Use List.fold to process entries functionally
+        allEntries
+        |> List.fold
+            (fun (processedKeys: Set<byte array>, mergedEntries: (byte array * ValueLocation) list) (key, valueLoc, _) ->
+                if processedKeys.Contains key then
+                    // Key already processed, skip
+                    (processedKeys, mergedEntries)
+                else
+                    // First occurrence of this key (due to descending timestamp sort)
+                    (processedKeys.Add key, (key, valueLoc) :: mergedEntries))
+            (Set.empty<byte array>, [])
+        |> snd
+        |> List.rev // Reverse to maintain key order
 
     /// <summary>
     /// Step 3: Applies value location remapping to entries.
@@ -964,29 +967,32 @@ type OcisDB
     /// We use Set to automatically deduplicate locations and enable fast lookups.
     /// </summary>
     static member private GetLiveLocations(dbRef: OcisDB ref) : Set<int64> =
-        let mutable liveLocations = Set.empty<int64>
+        // Helper function to collect live locations from a Memtbl
+        let collectFromMemtbl (memtbl: Memtbl) =
+            memtbl
+            |> Seq.choose (fun (KeyValue(_, valueLoc)) -> if valueLoc <> -1L then Some valueLoc else None)
+            |> Set.ofSeq
 
-        // From CurrentMemtbl
-        dbRef.Value.CurrentMemtbl
-        |> Seq.iter (fun (KeyValue(_, valueLoc)) ->
-            if valueLoc <> -1L then // Exclude deletion markers
-                liveLocations <- liveLocations.Add valueLoc)
+        // Collect live locations from all sources
+        let locationSets =
+            [
+              // From CurrentMemtbl
+              collectFromMemtbl dbRef.Value.CurrentMemtbl
 
-        // From ImmutableMemtbls
-        dbRef.Value.ImmutableMemtbls
-        |> Seq.collect (fun memtbl -> memtbl |> Seq.map (fun (KeyValue(_, valueLoc)) -> valueLoc))
-        |> Seq.filter (fun valueLoc -> valueLoc <> -1L) // Exclude deletion markers
-        |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add valueLoc)
+              // From ImmutableMemtbls
+              yield! dbRef.Value.ImmutableMemtbls |> List.map collectFromMemtbl
 
-        // From SSTables
-        dbRef.Value.SSTables
-        |> Map.toSeq
-        |> Seq.collect (fun (_, sstblList) ->
-            sstblList
-            |> Seq.collect (fun sstbl -> sstbl |> Seq.map (fun (KeyValue(_, valueLoc)) -> valueLoc)))
-        |> Seq.filter (fun valueLoc -> valueLoc <> -1L) // Exclude deletion markers
-        |> Seq.iter (fun valueLoc -> liveLocations <- liveLocations.Add valueLoc)
+              // From SSTables
+              dbRef.Value.SSTables
+              |> Map.toSeq
+              |> Seq.collect (fun (_, sstblList) ->
+                  sstblList
+                  |> Seq.collect (fun sstbl ->
+                      sstbl
+                      |> Seq.choose (fun (KeyValue(_, valueLoc)) -> if valueLoc <> -1L then Some valueLoc else None)))
+              |> Set.ofSeq ]
 
+        let liveLocations = Set.unionMany locationSets
         Logger.Debug $"Collected {liveLocations.Count} live value locations for GC"
         liveLocations
 
@@ -1043,17 +1049,18 @@ type OcisDB
                             let initialMemtbl = Memtbl()
                             Logger.Debug "Replaying WAL entries..."
 
-                            let replayedEntries = Wal.Replay walPath
-                            let mutable replayCount = 0
-
-                            for entry in replayedEntries do
-                                match entry with
-                                | WalEntry.Set(key, valueLoc) ->
-                                    initialMemtbl.Add(key, valueLoc)
-                                    replayCount <- replayCount + 1
-                                | WalEntry.Delete key ->
-                                    initialMemtbl.Delete key
-                                    replayCount <- replayCount + 1
+                            let replayCount =
+                                Wal.Replay walPath
+                                |> Seq.fold
+                                    (fun count entry ->
+                                        match entry with
+                                        | WalEntry.Set(key, valueLoc) ->
+                                            initialMemtbl.Add(key, valueLoc)
+                                            count + 1
+                                        | WalEntry.Delete key ->
+                                            initialMemtbl.Delete key
+                                            count + 1)
+                                    0
 
                             Logger.Info $"Replayed {replayCount} WAL entries into MemTable"
 

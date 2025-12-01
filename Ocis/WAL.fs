@@ -82,21 +82,36 @@ type Wal(path: string, fileStream: FileStream) =
 
                     use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
 
-                    while fileStream.Position < fileStream.Length do
-                        let entryType = reader.ReadByte()
+                    // Recursive function to read entries functionally
+                    let rec readEntries () =
+                        seq {
+                            if fileStream.Position < fileStream.Length then
+                                try
+                                    let entryType = reader.ReadByte()
 
-                        match entryType with
-                        | 0uy -> // Set type
-                            let key = Serialization.readByteArray reader
-                            let valueLocation = Serialization.readValueLocation reader
-                            yield WalEntry.Set(key, valueLocation)
-                        | 1uy -> // Delete type
-                            let key = Serialization.readByteArray reader
-                            yield WalEntry.Delete key
-                        | _ ->
-                            // Encountered unknown or corrupted entry, skip or log error
-                            Logger.Warn $"Encountered unknown WAL entry type {int entryType} in WAL file '{path}'."
-                // Attempt to skip the current entry, but for simplicity, we break here. A more robust skipping logic is needed in production systems.
+                                    match entryType with
+                                    | 0uy -> // Set type
+                                        let key = Serialization.readByteArray reader
+                                        let valueLocation = Serialization.readValueLocation reader
+                                        yield WalEntry.Set(key, valueLocation)
+                                        yield! readEntries ()
+                                    | 1uy -> // Delete type
+                                        let key = Serialization.readByteArray reader
+                                        yield WalEntry.Delete key
+                                        yield! readEntries ()
+                                    | _ ->
+                                        // Encountered unknown or corrupted entry, skip and continue
+                                        Logger.Warn
+                                            $"Encountered unknown WAL entry type {int entryType} in WAL file '{path}'."
+
+                                        yield! readEntries ()
+                                with :? EndOfStreamException ->
+                                    // File might be incomplete, or reached end of stream
+                                    Logger.Warn
+                                        $"Reached end of stream when replaying WAL file '{path}', file might be incomplete."
+                        }
+
+                    yield! readEntries ()
                 with
                 | :? EndOfStreamException ->
                     // File might be incomplete, or reached end of stream
