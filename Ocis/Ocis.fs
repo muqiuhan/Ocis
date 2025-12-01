@@ -828,10 +828,10 @@ type OcisDB
                     // Step 3: Perform garbage collection using synchronous method
                     Logger.Info "Using synchronous garbage collection"
 
-                    let! remappedLocationsOption = Valog.CollectGarbage(this.ValueLog, liveLocations)
+                    let! gcResult = Valog.CollectGarbage(this.ValueLog, liveLocations)
 
-                    match remappedLocationsOption with
-                    | Some(Ok(newValog, remappedLocations)) ->
+                    match gcResult with
+                    | Ok(newValog, remappedLocations) ->
                         // Store reference to old valog for disposal
                         let oldValog = this.ValueLog
 
@@ -854,8 +854,7 @@ type OcisDB
                         // Trigger compaction to update affected SSTables
                         this.PerformRecompactionForRemapped remappedLocations
 
-                    | Some(Error msg) -> Logger.Error $"GC failed: {msg}"
-                    | None -> Logger.Info "GC: No values needed to be moved"
+                    | Error msg -> Logger.Error $"GC failed: {msg}"
 
             with ex ->
                 Logger.Error $"GC error: {ex.Message}"
