@@ -34,3 +34,37 @@ type OcisError =
         | ResourceDisposalError(resource, message) -> $"Failed to dispose {resource}: {message}"
 
 type Result<'T> = Result<'T, OcisError>
+
+/// <summary>
+/// Result computation expression builder for functional error handling.
+/// Simplifies nested Result.bind operations and makes error handling more readable.
+/// </summary>
+type ResultBuilder() =
+    member _.Return(x: 'T) = Ok x
+    member _.ReturnFrom(m: Result<'T, 'E>) = m
+    member _.Bind(m: Result<'T, 'E>, f: 'T -> Result<'U, 'E>) = Result.bind f m
+    member _.Zero() = Ok()
+    member _.Delay(f: unit -> Result<'T, 'E>) = f
+    member _.Run(f: unit -> Result<'T, 'E>) = f ()
+
+    member _.Combine(m1: Result<unit, 'E>, m2: unit -> Result<'T, 'E>) =
+        match m1 with
+        | Ok() -> m2 ()
+        | Error e -> Error e
+
+    member _.TryWith(m: unit -> Result<'T, 'E>, h: exn -> Result<'T, 'E>) =
+        try
+            m ()
+        with ex ->
+            h ex
+
+    member _.TryFinally(m: unit -> Result<'T, 'E>, compensation: unit -> unit) =
+        try
+            m ()
+        finally
+            compensation ()
+
+/// <summary>
+/// Result computation expression instance for use in code.
+/// </summary>
+let result = ResultBuilder()

@@ -440,8 +440,6 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
         (oldPath: string, newPath: string, liveLocations: Set<int64>)
         : Async<Result<Map<int64, int64>, string>> =
         async {
-            let mutable remappedLocations = Map.empty<int64, int64>
-
             try
                 use newFileStream =
                     new FileStream(newPath, FileMode.Create, FileAccess.Write, FileShare.None)
@@ -453,23 +451,30 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
 
                 use oldReader = new BinaryReader(oldFileStream, System.Text.Encoding.UTF8, true)
 
-                while oldFileStream.Position < oldFileStream.Length do
-                    let originalOffset = oldFileStream.Position
-                    let keyLength = oldReader.ReadInt32()
-                    let key = oldReader.ReadBytes keyLength
-                    let valueLength = oldReader.ReadInt32()
-                    let value = oldReader.ReadBytes valueLength
+                // Recursive function to copy entries functionally
+                let rec copyEntries (remapped: Map<int64, int64>) =
+                    if oldFileStream.Position >= oldFileStream.Length then
+                        remapped
+                    else
+                        let originalOffset = oldFileStream.Position
+                        let keyLength = oldReader.ReadInt32()
+                        let key = oldReader.ReadBytes keyLength
+                        let valueLength = oldReader.ReadInt32()
+                        let value = oldReader.ReadBytes valueLength
 
-                    if liveLocations.Contains originalOffset then
-                        let newOffset = newFileStream.Position
+                        if liveLocations.Contains originalOffset then
+                            let newOffset = newFileStream.Position
 
-                        remappedLocations <- remappedLocations.Add(originalOffset, newOffset)
+                            newWriter.Write keyLength
+                            newWriter.Write key
+                            newWriter.Write valueLength
+                            newWriter.Write value
 
-                        newWriter.Write keyLength
-                        newWriter.Write key
-                        newWriter.Write valueLength
-                        newWriter.Write value
+                            copyEntries (remapped.Add(originalOffset, newOffset))
+                        else
+                            copyEntries remapped
 
+                let remappedLocations = copyEntries Map.empty<int64, int64>
                 return Ok remappedLocations
             with ex ->
                 return Error $"Error copying live data during Valog GC: {ex.Message}"

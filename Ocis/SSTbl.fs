@@ -349,33 +349,33 @@ type SSTbl
             None
 
         else
-            // Binary search on the RecordOffsets array in memory.
+            // Binary search on the RecordOffsets array in memory using tail recursion.
             // Since RecordOffsets only stores offsets, we need to read the actual key from the file for each probe.
-            let mutable low = 0
-            let mutable high = recordOffsets.Length - 1
-            let mutable found = false
-            let mutable valueLocation = -1L
-
-            while low <= high && not found do
-                let midIdx = low + (high - low) / 2
-                let currentOffset = recordOffsets[midIdx]
-
-                // Move the read/write position of the FileStream to the current offset
-                fileStream.Seek(currentOffset, SeekOrigin.Begin) |> ignore
-                // Use BinaryReader to read data, with leaveOpen: true to ensure the underlying FileStream is not closed
-                let currentKey = Serialization.readByteArray reader // Read the key at the current position
-                let cmp = ByteArrayComparer.ComparerInstance.Compare(key, currentKey) // Compare the target key and the current key
-
-                if cmp = 0 then
-                    // Found an exact match
-                    valueLocation <- Serialization.readValueLocation reader // Read the corresponding value location
-                    found <- true
-                elif cmp < 0 then
-                    high <- midIdx - 1 // Target key is less than current key, continue searching in the left half
+            let rec binarySearch (low: int) (high: int) : ValueLocation option =
+                if low > high then
+                    None
                 else
-                    low <- midIdx + 1 // Target key is greater than current key, continue searching in the right half
+                    let midIdx = low + (high - low) / 2
+                    let currentOffset = recordOffsets[midIdx]
 
-            if found then Some valueLocation else None
+                    // Move the read/write position of the FileStream to the current offset
+                    fileStream.Seek(currentOffset, SeekOrigin.Begin) |> ignore
+                    // Use BinaryReader to read data, with leaveOpen: true to ensure the underlying FileStream is not closed
+                    let currentKey = Serialization.readByteArray reader // Read the key at the current position
+                    let cmp = ByteArrayComparer.ComparerInstance.Compare(key, currentKey) // Compare the target key and the current key
+
+                    match cmp with
+                    | 0 ->
+                        // Found an exact match
+                        Some(Serialization.readValueLocation reader) // Read the corresponding value location
+                    | x when x < 0 ->
+                        // Target key is less than current key, continue searching in the left half
+                        binarySearch low (midIdx - 1)
+                    | _ ->
+                        // Target key is greater than current key, continue searching in the right half
+                        binarySearch (midIdx + 1) high
+
+            binarySearch 0 (recordOffsets.Length - 1)
 
     /// <summary>
     /// Close the underlying file stream of the SSTbl instance.
