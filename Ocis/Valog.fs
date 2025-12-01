@@ -82,8 +82,72 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
             fileStream.Dispose()
 
     /// <summary>
+    /// Waits for a file to become available for read/write operations.
+    /// This is used after file operations to ensure file handles are released by the OS.
+    /// </summary>
+    /// <param name="path">The path of the file to wait for.</param>
+    /// <param name="maxAttempts">Maximum number of attempts to check file availability.</param>
+    /// <returns>Async Result indicating success or failure.</returns>
+    static member private WaitForFileAvailable(path: string, maxAttempts: int) : Async<Result<unit, string>> =
+        let rec waitForFile attempts =
+            async {
+                if attempts >= maxAttempts then
+                    return Error $"File {path} still not available after {maxAttempts} attempts"
+                else
+                    try
+                        // Try to open the file with exclusive access to verify it's available
+                        use testStream =
+                            new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
+
+                        if testStream.CanRead && testStream.CanWrite then
+                            return Ok()
+                        else
+                            do! Async.Sleep 50
+                            return! waitForFile (attempts + 1)
+                    with
+                    | :? IOException ->
+                        // File is still locked, wait and retry
+                        do! Async.Sleep 50
+                        return! waitForFile (attempts + 1)
+                    | ex -> return Error $"Error checking file availability: {ex.Message}"
+            }
+
+        waitForFile 0
+
+    /// <summary>
+    /// Attempts to recover from a crashed GC operation by checking for .temp files.
+    /// If a .temp file exists and the main file doesn't, it will be promoted to the main file.
+    /// </summary>
+    /// <param name="path">The path of the Valog file.</param>
+    /// <returns>True if recovery was performed, false otherwise.</returns>
+    static member private TryRecoverFromCrash(path: string) : bool =
+        try
+            let tempPath = path + ".temp"
+
+            if File.Exists tempPath then
+                if not (File.Exists path) then
+                    // Main file is missing but temp file exists - this indicates a crash during GC
+                    Logger.Warn
+                        $"Detected incomplete GC: temp file exists but main file missing. Attempting recovery..."
+
+                    File.Move(tempPath, path)
+                    Logger.Info $"Recovered Valog from temp file: {path}"
+                    true
+                else
+                    // Both files exist - temp file is stale, remove it
+                    Logger.Debug $"Removing stale temp file: {tempPath}"
+                    File.Delete tempPath
+                    false
+            else
+                false
+        with ex ->
+            Logger.Warn $"Error during crash recovery: {ex.Message}"
+            false
+
+    /// <summary>
     /// Open or create a Value Log file.
     /// If the file does not exist, it will be created. If it exists, it will be opened and written from the end of the file.
+    /// This method also attempts to recover from crashed GC operations.
     /// </summary>
     /// <param name="path">The path of the Value Log file.</param>
     /// <returns>A Result type: if successful, returns Ok Valog instance, otherwise returns Error string.</returns>
@@ -93,6 +157,9 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
         let mutable writer: BinaryWriter = null
 
         try
+            // Attempt to recover from crashed GC operations
+            Valog.TryRecoverFromCrash path |> ignore
+
             fileStream <- new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite)
 
             // Initialize Head to the current length of the file. If the file is new, the length is 0.
@@ -286,30 +353,63 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                     Valog.ProcessGCBatch(stateWithWriter, oldReader, liveLocations, config)
 
                 if finalState.IsCompleted then
-                    // Atomically replace the old Valog with the new one
-                    // Note: We don't dispose the old valog here - let the caller manage its lifecycle
-                    File.Delete valog.Path
-                    File.Move(tempValogPath, valog.Path)
+                    // Ensure all data is written to disk before replacing
+                    tempWriter.Flush()
+                    tempFileStream.Flush(true) // Force fsync to ensure data is on disk
 
-                    // Small delay to ensure file handles are released by the OS
-                    do! Async.Sleep 10
+                    // Explicitly close all file handles before atomic replacement
+                    tempWriter.Dispose()
+                    tempFileStream.Dispose()
+                    oldReader.Dispose()
+                    oldFileStream.Dispose()
 
-                    // Reopen Valog instance
-                    match Valog.Create valog.Path with
-                    | Ok newValog ->
-                        Logger.Info
-                            $"Incremental Valog GC completed: processed {finalState.ProcessedCount} live locations"
-
-                        return
-                            Ok(
-                                { finalState with
-                                    TempWriter = None
-                                    NewValog = Some newValog },
-                                Some newValog
+                    // Atomically replace the old Valog with the new one using File.Replace
+                    // File.Replace is more atomic than Delete + Move, and handles edge cases better
+                    try
+                        if File.Exists valog.Path then
+                            File.Replace(
+                                sourceFileName = tempValogPath,
+                                destinationFileName = valog.Path,
+                                destinationBackupFileName = null, // No backup needed
+                                ignoreMetadataErrors = false
                             )
-                    | Error msg ->
-                        Logger.Error $"Failed to reopen Valog after incremental GC: {msg}"
-                        return Error $"Failed to reopen Valog: {msg}"
+                        else
+                            // If destination doesn't exist, File.Replace will fail, so use Move instead
+                            File.Move(tempValogPath, valog.Path)
+
+                        Logger.Debug "Valog file atomically replaced after GC"
+
+                        // Wait for file handles to be released by the OS (with retry logic)
+                        let! fileAvailable = Valog.WaitForFileAvailable(valog.Path, 10)
+
+                        match fileAvailable with
+                        | Ok() ->
+                            // Reopen Valog instance
+                            match Valog.Create valog.Path with
+                            | Ok newValog ->
+                                Logger.Info
+                                    $"Incremental Valog GC completed: processed {finalState.ProcessedCount} live locations"
+
+                                return
+                                    Ok(
+                                        { finalState with
+                                            TempWriter = None
+                                            NewValog = Some newValog },
+                                        Some newValog
+                                    )
+                            | Error msg ->
+                                Logger.Error $"Failed to reopen Valog after incremental GC: {msg}"
+                                return Error $"Failed to reopen Valog: {msg}"
+                        | Error msg ->
+                            Logger.Error $"File not available after GC replacement: {msg}"
+                            return Error $"File not available after GC: {msg}"
+                    with ex ->
+                        Logger.Error $"Failed to replace Valog file atomically: {ex.Message}"
+                        // Try to recover: if temp file exists, keep it for manual recovery
+                        if File.Exists tempValogPath then
+                            Logger.Warn $"Temp Valog file preserved at {tempValogPath} for recovery"
+
+                        return Error $"Failed to replace Valog file: {ex.Message}"
                 else
                     // GC is not yet completed, return current state for continuation
                     Logger.Debug

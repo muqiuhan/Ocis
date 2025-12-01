@@ -266,3 +266,89 @@ type ValogTests() =
                 Assert.That(actualValue, Is.EqualTo value, "The persisted value should match.")
             | Error msg -> Assert.Fail $"Failed to reopen Valog: {msg}"
         | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
+    member this.Create_ShouldRecoverFromCrashedGC() =
+        // Simulate a crashed GC: create a temp file but no main file
+        let tempPath = testFilePath + ".temp"
+        let testData = Encoding.UTF8.GetBytes "recovered data"
+        File.WriteAllBytes(tempPath, testData)
+
+        // Create should detect and recover from the temp file
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+
+            Assert.That(File.Exists testFilePath, Is.True, "Main file should be created from temp file.")
+            Assert.That(File.Exists tempPath, Is.False, "Temp file should be removed after recovery.")
+            Assert.That(valog.Head, Is.EqualTo(int64 testData.Length), "Head should reflect recovered file size.")
+        | Error msg -> Assert.Fail $"Failed to recover Valog from temp file: {msg}"
+
+    [<Test>]
+    member this.Create_ShouldRemoveStaleTempFile() =
+        // Create both main file and stale temp file
+        let tempPath = testFilePath + ".temp"
+        File.WriteAllBytes(testFilePath, Encoding.UTF8.GetBytes "main data")
+        File.WriteAllBytes(tempPath, Encoding.UTF8.GetBytes "stale temp data")
+
+        // Create should remove the stale temp file
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+
+            Assert.That(File.Exists testFilePath, Is.True, "Main file should still exist.")
+            Assert.That(File.Exists tempPath, Is.False, "Stale temp file should be removed.")
+        | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
+    member this.GC_ShouldAtomicallyReplaceFile() =
+        // Create initial Valog with some data
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+            let key1 = Encoding.UTF8.GetBytes "key1"
+            let value1 = Encoding.UTF8.GetBytes "value1"
+            let offset1 = valog.Append(key1, value1)
+            valog.Flush()
+
+            // Perform GC (simulate by creating a new file and using File.Replace)
+            let tempPath = testFilePath + ".temp"
+
+            use tempStream =
+                new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None)
+
+            use tempWriter = new BinaryWriter(tempStream, Encoding.UTF8, false)
+
+            // Write new data to temp file
+            let key2 = Encoding.UTF8.GetBytes "key2"
+            let value2 = Encoding.UTF8.GetBytes "value2"
+            tempWriter.Write key2.Length
+            tempWriter.Write key2
+            tempWriter.Write value2.Length
+            tempWriter.Write value2
+
+            tempWriter.Flush()
+            tempStream.Flush(true) // Force fsync
+
+            tempWriter.Dispose()
+            tempStream.Dispose()
+
+            // Atomically replace using File.Replace
+            if File.Exists testFilePath then
+                File.Replace(tempPath, testFilePath, null, false)
+            else
+                File.Move(tempPath, testFilePath)
+
+            // Verify the file was atomically replaced
+            Assert.That(File.Exists testFilePath, Is.True, "Main file should exist after atomic replace.")
+            Assert.That(File.Exists tempPath, Is.False, "Temp file should not exist after atomic replace.")
+
+            // Verify we can read the new data
+            match Valog.Create testFilePath with
+            | Ok newValog ->
+                use newValog = newValog
+                // The new file should have the new data
+                Assert.That(newValog.Head, Is.GreaterThan 0L, "New Valog should have data.")
+            | Error msg -> Assert.Fail $"Failed to open Valog after atomic replace: {msg}"
+
+        | Error msg -> Assert.Fail $"Failed to create initial Valog: {msg}"
