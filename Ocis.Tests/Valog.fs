@@ -216,6 +216,115 @@ type ValogTests() =
         | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
 
     [<Test>]
+    member this.ReadValueOnly_ShouldRetrieveCorrectValueWithoutKey() =
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+            let key = Encoding.UTF8.GetBytes "readvalueonlykey"
+            let value = Encoding.UTF8.GetBytes "readvalueonlyvalue"
+
+            let offset = valog.Append(key, value)
+            valog.Flush() // Ensure the data is written to disk
+
+            // Reopen Valog to simulate a new session read
+            match Valog.Create testFilePath with
+            | Ok reopenedValog ->
+                use reopenedValog = reopenedValog
+                let result = reopenedValog.ReadValueOnly offset
+                Assert.That(result.IsSome, Is.True, "Should be able to read the value.")
+                let actualValue = result.Value
+                Assert.That(actualValue, Is.EqualTo value, "The read value should match.")
+            | Error msg -> Assert.Fail $"Failed to reopen Valog: {msg}"
+
+        | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
+    member this.ReadValueOnly_ShouldReturnNoneForInvalidLocation() =
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+            let key = Encoding.UTF8.GetBytes "somekey"
+            let value = Encoding.UTF8.GetBytes "somevalue"
+
+            let offset = valog.Append(key, value)
+            valog.Flush()
+
+            // Try to read an invalid offset
+            let invalidOffsetBefore = offset - 1L
+            let invalidOffsetAfter = valog.Head + 1L
+
+            Assert.That(
+                valog.ReadValueOnly(invalidOffsetBefore).IsNone,
+                Is.True,
+                "Reading an invalid offset before Head should return None."
+            )
+
+            Assert.That(
+                valog.ReadValueOnly(invalidOffsetAfter).IsNone,
+                Is.True,
+                "Reading an invalid offset after Head should return None."
+            )
+
+            Assert.That(
+                valog.ReadValueOnly(valog.Tail - 1L).IsNone,
+                Is.True,
+                "Reading an invalid offset before Tail should return None."
+            )
+
+        | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
+    member this.ReadValueOnly_ShouldHandleMultipleEntriesCorrectly() =
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+
+            let entries =
+                [ for i in 0..9 -> (Encoding.UTF8.GetBytes $"key{i}", Encoding.UTF8.GetBytes $"value{i}") ]
+
+            let offsets = [ for key, value in entries -> valog.Append(key, value) ]
+            valog.Flush()
+
+            for i = 0 to 9 do
+                let expectedKey, expectedValue = entries[i]
+                let offset = offsets[i]
+                let result = valog.ReadValueOnly offset
+
+                Assert.That(result.IsSome, Is.True, $"Should be able to read the {i}th value.")
+
+                let actualValue = result.Value
+
+                // Verify that ReadValueOnly skips the key correctly
+                Assert.That(actualValue, Is.EqualTo expectedValue, $"The {i}th value should match.")
+
+        | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
+    member this.ReadValueOnly_ShouldSkipKeyAndOnlyReadValue() =
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+            // Use a long key to ensure it's actually skipped
+            let longKey = Encoding.UTF8.GetBytes(String('K', 1000)) // 1000 byte key
+            let value = Encoding.UTF8.GetBytes "shortvalue"
+
+            let offset = valog.Append(longKey, value)
+            valog.Flush()
+
+            // ReadValueOnly should skip the 1000-byte key and only read the value
+            match Valog.Create testFilePath with
+            | Ok reopenedValog ->
+                use reopenedValog = reopenedValog
+                let result = reopenedValog.ReadValueOnly offset
+                Assert.That(result.IsSome, Is.True, "Should be able to read the value even with a long key.")
+                let actualValue = result.Value
+                Assert.That(actualValue, Is.EqualTo value, "The read value should match.")
+                Assert.That(actualValue.Length, Is.EqualTo value.Length, "Value length should be correct.")
+            | Error msg -> Assert.Fail $"Failed to reopen Valog: {msg}"
+
+        | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
     member this.Dispose_ShouldCloseFileStreamAndAllowReopening() =
         let valogOption = Valog.Create testFilePath
 

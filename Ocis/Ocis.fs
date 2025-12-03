@@ -346,8 +346,22 @@ type OcisDB
         : (byte array * ValueLocation * int64) list =
         Logger.Debug $"Collecting entries from {sstblsToMerge.Length} SSTables"
 
-        sstblsToMerge
-        |> List.collect (fun sstbl -> sstbl |> Seq.map (fun kvp -> kvp.Key, kvp.Value, sstbl.Timestamp) |> Seq.toList)
+        // Pre-allocate ResizeArray with estimated capacity to reduce reallocations
+        let estimatedCapacity =
+            sstblsToMerge |> List.sumBy (fun sstbl -> sstbl.RecordOffsets.Length)
+
+        let entries = ResizeArray<(byte array * ValueLocation * int64)>(estimatedCapacity)
+
+        // Collect entries using direct iteration to avoid intermediate collections
+        for sstbl in sstblsToMerge do
+            let timestamp = sstbl.Timestamp
+
+            for kvp in sstbl do
+                entries.Add(kvp.Key, kvp.Value, timestamp)
+
+        // Convert to list and sort
+        entries
+        |> Seq.toList
         |> List.sortBy (fun (key, _, timestamp) -> key, -timestamp) // Sort by key asc, timestamp desc
 
     /// <summary>
@@ -1294,6 +1308,7 @@ type OcisDB
 
     /// <summary>
     /// Helper function to resolve ValueLocation to actual value or error.
+    /// Uses ReadValueOnly to avoid unnecessary key allocation.
     /// </summary>
     member private this.ResolveValueLocation(valueLocation: int64) : Result<byte array option, string> =
         if valueLocation = -1L then
@@ -1303,8 +1318,8 @@ type OcisDB
             match this.EnsureValogAvailable() with
             | Error msg -> Error msg
             | Ok() ->
-                match this.ValueLog.Read valueLocation with
-                | Some(_, value) -> Ok(Some value)
+                match this.ValueLog.ReadValueOnly valueLocation with
+                | Some value -> Ok(Some value)
                 | None -> Error $"Failed to read value from Valog at location {valueLocation}."
 
     /// <summary>

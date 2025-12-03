@@ -42,14 +42,15 @@ AMD Ryzen 7 6800H with Radeon Graphics 4.79GHz, 1 CPU, 16 logical and 8 physical
 Job=ShortRun  InvocationCount=1  IterationCount=3  
 LaunchCount=1  UnrollFactor=1  WarmupCount=3  
 
- | Method      | Count      |           Mean |          Error |        StdDev |          Gen0 |      Gen1 |       Allocated |
- | ----------- | ---------- | -------------: | -------------: | ------------: | ------------: | --------: | --------------: |
- | **BulkSet** | **1000**   |   **5.373 ms** |   **4.641 ms** | **0.2544 ms** |         **-** |     **-** |   **167.42 KB** |
- | BulkGet     | 1000       |       6.545 ms |       5.465 ms |     0.2995 ms |             - |         - |       472.11 KB |
- | **BulkSet** | **10000**  |  **60.356 ms** | **152.673 ms** | **8.3685 ms** |         **-** |     **-** |  **1433.13 KB** |
- | BulkGet     | 10000      |      85.829 ms |      26.899 ms |     1.4744 ms |             - |         - |      4480.01 KB |
- | **BulkSet** | **100000** | **259.009 ms** | **120.832 ms** | **6.6232 ms** | **1000.0000** |     **-** | **14089.45 KB** |
- | BulkGet     | 100000     |     286.011 ms |      45.198 ms |     2.4775 ms |     4000.0000 | 2000.0000 |      41433.2 KB |
+ | Method      | Count      |           Mean |         Error |        StdDev |          Gen0 |      Gen1 |       Allocated |
+ | ----------- | ---------- | -------------: | ------------: | ------------: | ------------: | --------: | --------------: |
+ | **BulkSet** | **1000**   |   **5.276 ms** |  **7.500 ms** | **0.4111 ms** |         **-** |     **-** |   **166.36 KB** |
+ | BulkGet     | 1000       |       6.225 ms |      3.197 ms |     0.1752 ms |             - |         - |       400.73 KB |
+ | **BulkSet** | **10000**  |  **63.294 ms** | **13.292 ms** | **0.7286 ms** |         **-** |     **-** |  **1432.07 KB** |
+ | BulkGet     | 10000      |      79.719 ms |     53.906 ms |     2.9548 ms |             - |         - |      3775.82 KB |
+ | **BulkSet** | **100000** | **246.479 ms** | **40.782 ms** | **2.2354 ms** | **1000.0000** |     **-** | **14088.38 KB** |
+ | BulkGet     | 100000     |     283.456 ms |     54.018 ms |     2.9609 ms |     4000.0000 | 2000.0000 |     37525.88 KB |
+
 
 **Note**: These figures represent memory allocated per *operation* during the benchmark run, not the total private memory size of the process. For persistent storage engines, actual memory consumption may vary depending on data volume and internal caching mechanisms.
 
