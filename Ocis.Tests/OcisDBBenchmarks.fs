@@ -8,6 +8,7 @@ open System.Text
 
 [<MemoryDiagnoser>]
 [<ShortRunJob>]
+[<WarmupCount(3)>]
 type OcisDBBenchmarks() =
 
     let tempDir = "temp_ocisdb_benchmarks"

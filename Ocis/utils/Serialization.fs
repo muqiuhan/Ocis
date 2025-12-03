@@ -34,37 +34,112 @@ module internal Serialization =
         elif len <= 1024 then
             // For small arrays, use pool to reduce allocations
             let rented = byteArrayPool.Rent len
-            let read = reader.Read(rented, 0, len)
 
-            if read = len then
+            try
+                // Ensure complete read in case of partial reads
+                let mutable totalRead = 0
+
+                while totalRead < len do
+                    let read = reader.Read(rented, totalRead, len - totalRead)
+
+                    if read = 0 then
+                        failwith $"Unexpected end of stream: expected {len} bytes, got {totalRead}"
+
+                    totalRead <- totalRead + read
+
                 // Create a copy of the exact size to return
                 let result = Array.zeroCreate<byte> len
-                System.Array.Copy(rented, result, len)
-                byteArrayPool.Return rented
+                System.Array.Copy(rented, 0, result, 0, len)
                 result
-            else
-                // If read failed, return the rented array as-is (though this shouldn't happen)
+            finally
                 byteArrayPool.Return rented
-                let result = Array.zeroCreate<byte> read
-                System.Array.Copy(rented, result, read)
-                result
         else
-            // For large arrays, use the standard method
-            reader.ReadBytes len
+            // For large arrays, ensure complete read
+            let result = Array.zeroCreate<byte> len
+            let mutable totalRead = 0
+
+            while totalRead < len do
+                let read = reader.Read(result, totalRead, len - totalRead)
+
+                if read = 0 then
+                    failwith $"Unexpected end of stream: expected {len} bytes, got {totalRead}"
+
+                totalRead <- totalRead + read
+
+            result
 
     /// <summary>
     /// Read a byte array into a provided buffer to avoid allocation.
+    /// Ensures complete read even if partial reads occur.
     /// </summary>
     /// <param name="reader">The BinaryReader to read from.</param>
     /// <param name="buffer">The buffer to read into.</param>
-    /// <returns>The number of bytes read.</returns>
+    /// <returns>The number of bytes read (should equal len).</returns>
     let inline readByteArrayIntoBuffer (reader: BinaryReader) (buffer: byte array) =
         let len = reader.ReadInt32()
 
         if len > buffer.Length then
             failwith $"Buffer too small: required {len} bytes, buffer size {buffer.Length}"
 
-        reader.Read(buffer, 0, len)
+        // Ensure complete read
+        let mutable totalRead = 0
+
+        while totalRead < len do
+            let read = reader.Read(buffer, totalRead, len - totalRead)
+
+            if read = 0 then
+                failwith $"Unexpected end of stream: expected {len} bytes, got {totalRead}"
+
+            totalRead <- totalRead + read
+
+        totalRead
+
+    /// <summary>
+    /// Read a byte array key for comparison purposes, using ArrayPool to minimize allocations.
+    /// Returns a byte array that should be used immediately for comparison and then discarded.
+    /// For SSTable binary search optimization.
+    /// </summary>
+    /// <param name="reader">The BinaryReader to read from.</param>
+    /// <returns>The key byte array (may be from pool, should be used immediately).</returns>
+    let inline readKeyForComparison (reader: BinaryReader) : byte array =
+        let len = reader.ReadInt32()
+
+        if len <= 0 then
+            [||]
+        elif len <= 1024 then
+            // Use ArrayPool for small keys
+            let rented = byteArrayPool.Rent len
+
+            try
+                let mutable totalRead = 0
+
+                while totalRead < len do
+                    let read = reader.Read(rented, totalRead, len - totalRead)
+
+                    if read = 0 then
+                        failwith $"Unexpected end of stream: expected {len} bytes for key, got {totalRead}"
+
+                    totalRead <- totalRead + read
+                // Create a copy for safety (comparison may hold reference)
+                let result = Array.zeroCreate<byte> len
+                System.Array.Copy(rented, 0, result, 0, len)
+                result
+            finally
+                byteArrayPool.Return rented
+        else
+            // For large keys, read directly
+            let result = Array.zeroCreate<byte> len
+            let mutable totalRead = 0
+
+            while totalRead < len do
+                let read = reader.Read(result, totalRead, len - totalRead)
+
+                if read = 0 then
+                    failwith $"Unexpected end of stream: expected {len} bytes for key, got {totalRead}"
+
+                totalRead <- totalRead + read
+
+            result
 
     /// <summary>
     /// Write a ValueLocation (int64) to a BinaryWriter.

@@ -2,7 +2,14 @@ module Ocis.Valog
 
 open System
 open System.IO
+open System.Buffers
 open Ocis.Utils.Logger
+
+/// <summary>
+/// Byte array pool for reusing byte arrays to reduce allocations in Valog operations
+/// </summary>
+module private ValogPool =
+    let byteArrayPool = ArrayPool<byte>.Shared
 
 /// <summary>
 /// Configuration for incremental garbage collection
@@ -229,6 +236,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
 
     /// <summary>
     /// Read a key-value pair entry from the specified position in the Value Log.
+    /// Uses ArrayPool for small arrays to reduce allocations.
     /// </summary>
     /// <param name="location">The ValueLocation (offset) to read.</param>
     /// <returns>An Option type: if found and valid, returns Some (key, value), otherwise returns None.</returns>
@@ -243,15 +251,155 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                 // Move the file stream pointer to the specified position.
                 fileStream.Seek(location, SeekOrigin.Begin) |> ignore
 
-                // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
+                // Read key length and key
                 let keyLength = reader.ReadInt32()
-                let key = reader.ReadBytes keyLength
+
+                let key =
+                    if keyLength <= 1024 then
+                        // Use ArrayPool for small keys
+                        let rented = ValogPool.byteArrayPool.Rent keyLength
+
+                        try
+                            let mutable totalRead = 0
+
+                            while totalRead < keyLength do
+                                let read = reader.Read(rented, totalRead, keyLength - totalRead)
+
+                                if read = 0 then
+                                    failwith
+                                        $"Unexpected end of stream: expected {keyLength} bytes for key, got {totalRead}"
+
+                                totalRead <- totalRead + read
+
+                            let result = Array.zeroCreate<byte> keyLength
+                            System.Array.Copy(rented, 0, result, 0, keyLength)
+                            result
+                        finally
+                            ValogPool.byteArrayPool.Return rented
+                    else
+                        reader.ReadBytes keyLength
 
                 // Read the length of the value and the value byte array
                 let valueLength = reader.ReadInt32()
-                let value = reader.ReadBytes valueLength
+
+                let value =
+                    if valueLength <= 1024 then
+                        // Use ArrayPool for small values
+                        let rented = ValogPool.byteArrayPool.Rent valueLength
+
+                        try
+                            let mutable totalRead = 0
+
+                            while totalRead < valueLength do
+                                let read = reader.Read(rented, totalRead, valueLength - totalRead)
+
+                                if read = 0 then
+                                    failwith
+                                        $"Unexpected end of stream: expected {valueLength} bytes for value, got {totalRead}"
+
+                                totalRead <- totalRead + read
+
+                            let result = Array.zeroCreate<byte> valueLength
+                            System.Array.Copy(rented, 0, result, 0, valueLength)
+                            result
+                        finally
+                            ValogPool.byteArrayPool.Return rented
+                    else
+                        reader.ReadBytes valueLength
 
                 Some(key, value) // Return the read key-value pair.
+            with
+            | :? EndOfStreamException ->
+                // If the file is corrupted or the given position points to an incomplete entry (e.g., due to a crash), this may happen.
+                Logger.Warn $"Reached the end of the stream when reading Value Log offset {location}."
+
+                None
+            | ex ->
+                // Capture other potential I/O errors.
+                Logger.Error $"An error occurred when reading Value Log offset {location}: {ex.Message}"
+
+                None
+
+    /// <summary>
+    /// Read only the value from the specified position in the Value Log, skipping the key.
+    /// This is optimized for Get operations where only the value is needed.
+    /// Uses the same reading strategy as Read method for consistent performance, but skips key allocation.
+    /// </summary>
+    /// <param name="location">The ValueLocation (offset) to read.</param>
+    /// <returns>An Option type: if found and valid, returns Some value, otherwise returns None.</returns>
+    member _.ReadValueOnly(location: int64) : byte array option =
+        // Basic range check: ensure the position is within the valid range of the Value Log
+        // (after Tail and before Head).
+        if location < tail || location >= head then
+            None // Invalid position (possibly garbage collected or not yet written).
+        else
+            try
+                // Move the file stream pointer to the specified position.
+                // Use the same Seek method as Read for consistency
+                fileStream.Seek(location, SeekOrigin.Begin) |> ignore
+
+                // Skip key: read key length and skip key bytes
+                // Strategy matches Read method for consistent performance:
+                // - Small keys (<=1024): Use fixed buffer to avoid allocation (saves memory)
+                // - Large keys (>1024): Use ReadBytes then discard (matches Read performance)
+                let keyLength = reader.ReadInt32()
+
+                if keyLength > 0 then
+                    if keyLength <= 1024 then
+                        // Small key: Use fixed buffer from ArrayPool to read and discard
+                        // This avoids allocating a new array for each key (saves memory)
+                        let buffer = ValogPool.byteArrayPool.Rent 1024
+
+                        try
+                            let mutable remaining = keyLength
+
+                            while remaining > 0 do
+                                let toRead = min remaining 1024
+                                let read = reader.Read(buffer, 0, toRead)
+
+                                if read = 0 then
+                                    failwith
+                                        $"Unexpected end of stream: expected {keyLength} bytes for key, got {keyLength - remaining}"
+
+                                remaining <- remaining - read
+                        finally
+                            ValogPool.byteArrayPool.Return buffer
+                    else
+                        // Large key: Use ReadBytes then discard (same as Read method for performance consistency)
+                        // This matches Read method's performance for large keys
+                        reader.ReadBytes keyLength |> ignore
+
+                // Read the length of the value and the value byte array
+                // Use the same strategy as Read method for consistent performance
+                let valueLength = reader.ReadInt32()
+
+                let value =
+                    if valueLength <= 1024 then
+                        // Use ArrayPool for small values (same as Read method)
+                        let rented = ValogPool.byteArrayPool.Rent valueLength
+
+                        try
+                            let mutable totalRead = 0
+
+                            while totalRead < valueLength do
+                                let read = reader.Read(rented, totalRead, valueLength - totalRead)
+
+                                if read = 0 then
+                                    failwith
+                                        $"Unexpected end of stream: expected {valueLength} bytes for value, got {totalRead}"
+
+                                totalRead <- totalRead + read
+
+                            let result = Array.zeroCreate<byte> valueLength
+                            System.Array.Copy(rented, 0, result, 0, valueLength)
+                            result
+                        finally
+                            ValogPool.byteArrayPool.Return rented
+                    else
+                        // Use ReadBytes for large values (same as Read method)
+                        reader.ReadBytes valueLength
+
+                Some value
             with
             | :? EndOfStreamException ->
                 // If the file is corrupted or the given position points to an incomplete entry (e.g., due to a crash), this may happen.
