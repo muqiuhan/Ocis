@@ -427,3 +427,29 @@ type SSTblTests() =
             Throws.Nothing,
             "FileStream should be closed after Dispose, allowing re-opening."
         )
+
+    [<Test>]
+    member this.Flush_ShouldDeletePartialFileOnFailure() =
+        // Prepare a memtable with a single entry
+        let memtbl = createMemtbl 1
+        let timestamp = 0L
+        let level = 0
+
+        // Pre-create the directory and ensure the target file path is unique
+        Directory.CreateDirectory tempDir |> ignore
+
+        let failingPath =
+            Path.Combine(tempDir, $"fail_flush_{Guid.NewGuid().ToString()}.sst")
+
+        // Inject a failure right after writer creation to simulate mid-flush I/O error
+        TestHooks.FlushFailureHook <- Some(fun () -> raise (IOException "Injected failure"))
+
+        try
+            match SSTbl.Flush(memtbl, failingPath, timestamp, level) with
+            | Ok _ -> Assert.Fail "Flush should have failed due to injected I/O error"
+            | Error _ ->
+                // Flush failed as expected; the partial file should have been cleaned up
+                Assert.That(File.Exists failingPath, Is.False, "Partial SSTable should be deleted on failure")
+        finally
+            // Reset hook to avoid side effects on other tests
+            TestHooks.FlushFailureHook <- None
