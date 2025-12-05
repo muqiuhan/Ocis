@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup><Compile Include="Error.fs" />
     <Compile Include="ValueLocation.fs" />
+    <Compile Include="Config.fs" />
     <Compile Include="utils\ByteArrayComparer.fs" />
     <Compile Include="utils\Serialization.fs" />
     <Compile Include="utils\Logger.fs" />

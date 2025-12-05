@@ -3,6 +3,7 @@ module Ocis.Utils.Serialization
 open System.IO
 open System.Buffers
 open Ocis.ValueLocation
+open Ocis.Config
 
 module internal Serialization =
 
@@ -10,6 +11,34 @@ module internal Serialization =
     /// Byte array pool for reusing byte arrays to reduce allocations
     /// </summary>
     let private byteArrayPool = ArrayPool<byte>.Shared
+
+    /// <summary>
+    /// Validate a length value against configured maximum and optional remaining payload bytes.
+    /// remainingPayloadOpt should represent bytes available for the payload *after* consuming the length field itself.
+    let internal validateLengthValue (len: int) (remainingPayloadOpt: int64 option) (fieldName: string) =
+        if len < 0 then
+            raise (InvalidDataException($"Serialization error ({fieldName}): negative length {len}"))
+
+        if len > Limits.MaxEntrySizeBytes then
+            raise (
+                InvalidDataException(
+                    $"Serialization error ({fieldName}): length {len} exceeds max {Limits.MaxEntrySizeBytes}"
+                )
+            )
+
+        match remainingPayloadOpt with
+        | Some remaining when remaining >= 0L && int64 len > remaining ->
+            raise (
+                InvalidDataException(
+                    $"Serialization error ({fieldName}): length {len} exceeds remaining bytes {remaining}"
+                )
+            )
+        | _ -> len
+
+    /// Read an int32 length and validate it using optional remaining payload bytes.
+    let internal readLengthAndValidate (reader: BinaryReader) (fieldName: string) (remainingPayloadOpt: int64 option) =
+        let len = reader.ReadInt32()
+        validateLengthValue len remainingPayloadOpt fieldName
 
     /// <summary>
     /// Write a byte array to a BinaryWriter. First write length (int32), then write the byte array itself.
@@ -27,10 +56,10 @@ module internal Serialization =
     /// <param name="reader">The BinaryReader to read from.</param>
     /// <returns>The byte array read from the BinaryReader.</returns>
     let inline readByteArray (reader: BinaryReader) =
-        let len = reader.ReadInt32()
+        let len = readLengthAndValidate reader "byte array" None
 
-        if len <= 0 then
-            [||] // Return empty array for invalid lengths
+        if len = 0 then
+            [||]
         elif len <= 1024 then
             // For small arrays, use pool to reduce allocations
             let rented = byteArrayPool.Rent len
@@ -76,7 +105,7 @@ module internal Serialization =
     /// <param name="buffer">The buffer to read into.</param>
     /// <returns>The number of bytes read (should equal len).</returns>
     let inline readByteArrayIntoBuffer (reader: BinaryReader) (buffer: byte array) =
-        let len = reader.ReadInt32()
+        let len = readLengthAndValidate reader "byte array into buffer" None
 
         if len > buffer.Length then
             failwith $"Buffer too small: required {len} bytes, buffer size {buffer.Length}"
@@ -102,9 +131,9 @@ module internal Serialization =
     /// <param name="reader">The BinaryReader to read from.</param>
     /// <returns>The key byte array (may be from pool, should be used immediately).</returns>
     let inline readKeyForComparison (reader: BinaryReader) : byte array =
-        let len = reader.ReadInt32()
+        let len = readLengthAndValidate reader "key for comparison" None
 
-        if len <= 0 then
+        if len = 0 then
             [||]
         elif len <= 1024 then
             // Use ArrayPool for small keys

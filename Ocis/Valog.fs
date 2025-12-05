@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Buffers
 open Ocis.Utils.Logger
+open Ocis.Utils.Serialization
 
 /// <summary>
 /// Byte array pool for reusing byte arrays to reduce allocations in Valog operations
@@ -252,7 +253,10 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                 fileStream.Seek(location, SeekOrigin.Begin) |> ignore
 
                 // Read key length and key
-                let keyLength = reader.ReadInt32()
+                let totalRemaining = head - location
+
+                let keyLength =
+                    Serialization.readLengthAndValidate reader "valog key" (Some(totalRemaining - 4L))
 
                 let key =
                     if keyLength <= 1024 then
@@ -280,7 +284,10 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                         reader.ReadBytes keyLength
 
                 // Read the length of the value and the value byte array
-                let valueLength = reader.ReadInt32()
+                let remainingAfterKey = totalRemaining - 4L - int64 keyLength
+
+                let valueLength =
+                    Serialization.readLengthAndValidate reader "valog value" (Some(remainingAfterKey - 4L))
 
                 let value =
                     if valueLength <= 1024 then
@@ -342,7 +349,10 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                 // Strategy matches Read method for consistent performance:
                 // - Small keys (<=1024): Use fixed buffer to avoid allocation (saves memory)
                 // - Large keys (>1024): Use ReadBytes then discard (matches Read performance)
-                let keyLength = reader.ReadInt32()
+                let totalRemaining = head - location
+
+                let keyLength =
+                    Serialization.readLengthAndValidate reader "valog key" (Some(totalRemaining - 4L))
 
                 if keyLength > 0 then
                     if keyLength <= 1024 then
@@ -371,7 +381,10 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
 
                 // Read the length of the value and the value byte array
                 // Use the same strategy as Read method for consistent performance
-                let valueLength = reader.ReadInt32()
+                let remainingAfterKey = totalRemaining - 4L - int64 keyLength
+
+                let valueLength =
+                    Serialization.readLengthAndValidate reader "valog value" (Some(remainingAfterKey - 4L))
 
                 let value =
                     if valueLength <= 1024 then
@@ -598,10 +611,21 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
             try
                 let originalOffset = oldReader.BaseStream.Position
 
-                // Read key and value lengths
-                let keyLength = oldReader.ReadInt32()
+                // Read key and value lengths with precomputed remaining bytes
+                let remainingTotal = oldReader.BaseStream.Length - oldReader.BaseStream.Position
+
+                let keyLength =
+                    Serialization.readLengthAndValidate oldReader "valog key (GC batch)" (Some(remainingTotal - 4L))
+
                 let key = oldReader.ReadBytes keyLength
-                let valueLength = oldReader.ReadInt32()
+                let remainingAfterKey = remainingTotal - 4L - int64 keyLength
+
+                let valueLength =
+                    Serialization.readLengthAndValidate
+                        oldReader
+                        "valog value (GC batch)"
+                        (Some(remainingAfterKey - 4L))
+
                 let value = oldReader.ReadBytes valueLength
 
                 // Check if this entry is live
@@ -705,9 +729,24 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
                         remapped
                     else
                         let originalOffset = oldFileStream.Position
-                        let keyLength = oldReader.ReadInt32()
+                        let remainingTotal = oldFileStream.Length - originalOffset
+
+                        let keyLength =
+                            Serialization.readLengthAndValidate
+                                oldReader
+                                "valog key (copy live data)"
+                                (Some(remainingTotal - 4L))
+
                         let key = oldReader.ReadBytes keyLength
-                        let valueLength = oldReader.ReadInt32()
+
+                        let remainingAfterKey = remainingTotal - 4L - int64 keyLength
+
+                        let valueLength =
+                            Serialization.readLengthAndValidate
+                                oldReader
+                                "valog value (copy live data)"
+                                (Some(remainingAfterKey - 4L))
+
                         let value = oldReader.ReadBytes valueLength
 
                         if liveLocations.Contains originalOffset then
