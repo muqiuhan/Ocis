@@ -10,6 +10,12 @@ open System.Collections.Generic
 open System.Collections
 open Ocis.Utils.Logger
 
+/// Test-only hooks to inject failures.
+module TestHooks =
+    /// Optional hook that will be invoked right after the SSTable writer is created.
+    /// Intended for unit tests to simulate I/O failures and verify cleanup logic.
+    let mutable FlushFailureHook: (unit -> unit) option = None
+
 /// FileStream needs to be closed and released correctly after use (using the use keyword).
 /// RecordOffsets is a sparse index in memory, pointing to the starting position of each key-value pair in the SSTable file.
 /// LowKey and HighKey are used to quickly determine if a key may exist in this SSTable, reducing unnecessary disk lookups.
@@ -92,6 +98,14 @@ type SSTbl
     /// <param name="level">The compression level of the SSTable.</param>
     /// <returns>A Result: Ok path if successful, otherwise an Error OcisError.</returns>
     static member Flush(memtbl: Memtbl | null, path: string, timestamp: int64, level: int) : Result<string, OcisError> =
+        // Ensure half-written SSTable files are removed on any failure to preserve atomicity
+        let deleteIfExists () =
+            try
+                if File.Exists path then
+                    File.Delete path
+            with _ ->
+                ()
+
         try
             if obj.ReferenceEquals(memtbl, null) then
                 Error NullMemtbl
@@ -107,6 +121,11 @@ type SSTbl
                     new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)
 
                 use writer = new BinaryWriter(fileStream)
+
+                // Allow tests to inject failures after file creation to verify cleanup.
+                match TestHooks.FlushFailureHook with
+                | Some hook -> hook ()
+                | None -> ()
 
                 // Pre-allocate capacity based on memtbl size to reduce allocations
                 let memtblCount = memtbl.Count
@@ -180,12 +199,16 @@ type SSTbl
 
         with
         | :? System.IO.IOException as ioEx ->
+            deleteIfExists ()
             Logger.Error $"I/O error during SSTable flush to '{path}': {ioEx.Message}"
             Error(IOError("SSTable flush", path, ioEx.Message))
         | :? System.UnauthorizedAccessException ->
+            deleteIfExists ()
             Logger.Error $"Access denied during SSTable flush to '{path}'"
             Error(UnauthorizedAccess path)
         | ex when ex.Message.Contains "Record index" ->
+            deleteIfExists ()
+
             let parts =
                 ex.Message.Split([| "exceeded expected count" |], System.StringSplitOptions.None)
 
@@ -199,6 +222,7 @@ type SSTbl
             else
                 Error(SSTableFlushError(path, ex.Message))
         | ex ->
+            deleteIfExists ()
             Logger.Error $"Exception type: {ex.GetType().FullName}"
             Logger.Error $"Unexpected error during SSTable flush to '{path}': {ex.Message}"
             Error(SSTableFlushError(path, ex.Message))
