@@ -2,6 +2,7 @@ module Ocis.Tests.Valog
 
 open NUnit.Framework
 open Ocis.Valog
+open Ocis.Config
 open System.Text
 open System.IO
 open System
@@ -323,6 +324,43 @@ type ValogTests() =
             | Error msg -> Assert.Fail $"Failed to reopen Valog: {msg}"
 
         | Error msg -> Assert.Fail $"Failed to create Valog: {msg}"
+
+    [<Test>]
+    member _.Read_ShouldReturnNone_WhenKeyLengthExceedsLimit() =
+        // Craft a corrupted Valog entry with an oversized key length to trigger validateLength guard.
+        let overLimit = Limits.MaxEntrySizeBytes + 1
+
+        // Write only the length field; no payload follows, so remaining-bytes check would also fail.
+        use fs =
+            new FileStream(testFilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)
+
+        use bw = new BinaryWriter(fs, Encoding.UTF8, true)
+        bw.Write overLimit
+        bw.Flush()
+
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+            let result = valog.Read 0L
+            Assert.That(result.IsNone, Is.True, "Oversized key length should yield None and not allocate.")
+        | Error msg -> Assert.Fail $"Failed to open Valog for oversized length test: {msg}"
+
+    [<Test>]
+    member _.ReadValueOnly_ShouldReturnNone_WhenLengthExceedsRemainingBytes() =
+        // Craft a truncated entry: declared length greater than remaining bytes in file.
+        use fs =
+            new FileStream(testFilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)
+
+        use bw = new BinaryWriter(fs, Encoding.UTF8, true)
+        bw.Write 100 // Declared length, but no bytes follow.
+        bw.Flush()
+
+        match Valog.Create testFilePath with
+        | Ok valog ->
+            use valog = valog
+            let result = valog.ReadValueOnly 0L
+            Assert.That(result.IsNone, Is.True, "Truncated entry should yield None due to length > remaining.")
+        | Error msg -> Assert.Fail $"Failed to open Valog for truncated length test: {msg}"
 
     [<Test>]
     member this.Dispose_ShouldCloseFileStreamAndAllowReopening() =
