@@ -48,3 +48,6 @@ module Logger =
 
     [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
     let inline Verbose (message: string) = LOGGER.LogTrace message
+
+    [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
+    let inline BeginScope<'TState when 'TState: not struct> (state: 'TState) = LOGGER.BeginScope state

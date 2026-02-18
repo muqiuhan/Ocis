@@ -6,7 +6,8 @@ open System.Net.Sockets
 open System.Threading
 open System.Collections.Concurrent
 open Ocis.Server.Connection
-open Ocis.OcisDB
+open Ocis.Server.DbDispatcher
+open Ocis.Server.Resilience
 open Ocis.Utils.Logger
 
 /// Server configuration
@@ -26,7 +27,7 @@ type ServerState =
     | Error of string
 
 /// TCP server
-type TcpServer(config: ServerConfig, db: OcisDB) =
+type TcpServer(config: ServerConfig, dispatcher: OcisDbDispatcher) =
     let mutable state = ServerState.Starting
     let mutable tcpListener: TcpListener option = None
     let mutable isDisposed = false
@@ -61,11 +62,14 @@ type TcpServer(config: ServerConfig, db: OcisDB) =
             with ex ->
                 state <- ServerState.Error ex.Message
                 Logger.Error $"Failed to start TCP server: {ex.Message}"
+                return raise ex
         }
 
     /// Main loop of accepting client connections
     member private this.AcceptConnectionsAsync(listener: TcpListener) =
         async {
+            let mutable transientAcceptFailureCount = 0
+
             try
                 while not cancellationTokenSource.Token.IsCancellationRequested
                       && state = ServerState.Running do
@@ -78,6 +82,7 @@ type TcpServer(config: ServerConfig, db: OcisDB) =
                         else
                             // Accept new connection
                             let! tcpClient = listener.AcceptTcpClientAsync() |> Async.AwaitTask
+                            transientAcceptFailureCount <- 0
 
                             // Configure client connection
                             tcpClient.ReceiveTimeout <- config.ReceiveTimeout
@@ -85,7 +90,7 @@ type TcpServer(config: ServerConfig, db: OcisDB) =
                             tcpClient.NoDelay <- true
 
                             // Create connection handler
-                            let connection = ConnectionManager.createConnection tcpClient.Client db
+                            let connection = ConnectionManager.createConnection tcpClient.Client dispatcher
 
                             // Add connection to active connection list
                             activeConnections.TryAdd(connection.ConnectionId, connection) |> ignore
@@ -97,12 +102,27 @@ type TcpServer(config: ServerConfig, db: OcisDB) =
                             this.HandleConnectionAsync connection |> Async.Start
 
                     with ex ->
-                        Logger.Error $"Error accepting connection: {ex.Message}"
-                        do! Async.Sleep 100 // Short wait and retry
+                        let shuttingDown =
+                            cancellationTokenSource.Token.IsCancellationRequested || state <> ServerState.Running
+
+                        if shuttingDown then
+                            ()
+                        elif isTransientAcceptException ex then
+                            let retryDelayMs = computeBoundedRetryDelayMs transientAcceptFailureCount 50 1000
+                            transientAcceptFailureCount <- transientAcceptFailureCount + 1
+
+                            Logger.Warn
+                                $"Transient accept error ({ex.Message}); retrying in {retryDelayMs}ms"
+
+                            do! Async.Sleep retryDelayMs
+                        else
+                            Logger.Error $"Fatal error accepting connection: {ex.Message}"
+                            return raise ex
 
             with ex ->
                 Logger.Error $"Error in connection accept loop: {ex.Message}"
                 state <- ServerState.Error ex.Message
+                return raise ex
         }
 
     /// Handle single client connection
@@ -125,7 +145,9 @@ type TcpServer(config: ServerConfig, db: OcisDB) =
     /// Stop server
     member this.StopAsync() =
         async {
-            if state = ServerState.Running then
+            match state with
+            | ServerState.Running
+            | ServerState.Error _ ->
                 try
                     Logger.Info "Stopping TCP server..."
                     state <- ServerState.Stopping
@@ -167,6 +189,7 @@ type TcpServer(config: ServerConfig, db: OcisDB) =
                 with ex ->
                     state <- ServerState.Error ex.Message
                     Logger.Error $"Error stopping TCP server: {ex.Message}"
+            | _ -> ()
         }
 
     /// Get server statistics
@@ -197,7 +220,8 @@ module ServerManager =
         }
 
     /// Create server instance
-    let createServer (config: ServerConfig) (db: OcisDB) = new TcpServer(config, db)
+    let createServer (config: ServerConfig) (dispatcher: OcisDbDispatcher) =
+        new TcpServer(config, dispatcher)
 
     /// Start server and wait for stop signal
     let runServer (server: TcpServer) (cancellationToken: CancellationToken) =

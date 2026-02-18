@@ -296,6 +296,7 @@ type ErrorHandlingTests() =
         Assert.That(result.Value, Is.EqualTo largeValue)
 
     [<Test>]
+    [<Category("Slow")>]
     member this.SSTableFlush_ShouldHandleLargeNumberOfEntries() =
         let memtbl = Memtbl()
 
@@ -392,6 +393,7 @@ type ErrorHandlingTests() =
         | Error msg -> Assert.Fail $"Failed to create database: {msg}"
 
     [<Test>]
+    [<Category("Slow")>]
     member this.FileSystemStressTest_ShouldHandleManyFiles() =
         let stressDir = Path.Combine(tempDir, $"stress_test_{Guid.NewGuid().ToString()}")
 
@@ -449,6 +451,7 @@ type ErrorHandlingTests() =
         | Error msg -> Assert.Fail $"Failed to create DB: {msg}"
 
     [<Test>]
+    [<Category("Slow")>]
     member this.MemoryPressureTest_ShouldHandleLargeDatasets() =
         let dbPath = Path.Combine(tempDir, "memory_pressure")
 
@@ -484,6 +487,7 @@ type ErrorHandlingTests() =
     // Advanced Benchmarks Error Handling Tests
 
     [<Test>]
+    [<Category("Slow")>]
     member this.LayeredWrite_ShouldHandleAsyncOperationsAndSleeps() =
         // Test for potential issues in LayeredWrite benchmark method
         let dbPath = Path.Combine(tempDir, "layered_write_test")
@@ -547,6 +551,7 @@ type ErrorHandlingTests() =
         | Error msg -> Assert.Fail $"Failed to create DB for layered write test: {msg}"
 
     [<Test>]
+    [<Category("Slow")>]
     member this.PostCompactionRead_ShouldHandleCompactionTriggering() =
         // Test for PostCompactionRead benchmark issues
         let dbPath = Path.Combine(tempDir, "post_compaction_test")
@@ -605,6 +610,7 @@ type ErrorHandlingTests() =
         | Error msg -> Assert.Fail $"Failed to create DB for post compaction test: {msg}"
 
     [<Test>]
+    [<Category("Slow")>]
     member this.RealisticWorkload_ShouldHandleMixedOperations() =
         // Test for RealisticWorkload benchmark issues
         let dbPath = Path.Combine(tempDir, "realistic_workload_test")

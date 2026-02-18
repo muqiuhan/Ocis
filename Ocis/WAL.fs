@@ -123,7 +123,26 @@ type Wal(path: string, fileStream: FileStream) =
     /// Forces any buffered write data to be written to the underlying file, and then to the device.
     /// This is crucial for data persistence.
     /// </summary>
-    member _.Flush() : unit = fileStream.Flush()
+    member _.Flush() : unit =
+        lock fileStream (fun () ->
+            fileStream.Flush())
+
+    /// <summary>
+    /// Forces buffered WAL data to be flushed to durable storage.
+    /// </summary>
+    member _.FlushDurable() : unit =
+        lock fileStream (fun () ->
+            fileStream.Flush(true))
+
+    /// <summary>
+    /// Safely truncates the WAL after a durable checkpoint.
+    /// </summary>
+    member _.Reset() : unit =
+        lock fileStream (fun () ->
+            fileStream.Flush(true)
+            fileStream.SetLength(0L)
+            fileStream.Seek(0L, SeekOrigin.Begin) |> ignore
+            fileStream.Flush(true))
 
     /// <summary>
     /// Closes the WAL file stream.

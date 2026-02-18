@@ -219,6 +219,7 @@ type SequentialOperationTests() =
             | ex -> Assert.Fail $"Unexpected exception type: {ex.GetType().Name}"
 
     [<Test>]
+    [<Category("Slow")>]
     member this.LongRunningOperations_ShouldCompleteSuccessfully() =
         let longRunningOperation () =
             do
@@ -258,6 +259,7 @@ type SequentialOperationTests() =
     // All operations completed synchronously
 
     [<Test>]
+    [<Category("Slow")>]
     member this.BackgroundOperations_ShouldHandleSequentialRequests() =
         // Test that background operations (compaction, GC, flush) work correctly with sequential requests
 

@@ -16,10 +16,14 @@
     <Compile Include="Config.fs" />
     <Compile Include="ProtocolSpec.fs" />
     <Compile Include="Protocol.fs" />
+    <Compile Include="Telemetry.fs" />
+    <Compile Include="DbDispatcher.fs" />
     <Compile Include="Handler.fs" />
     <Compile Include="Connection.fs" />
+    <Compile Include="Resilience.fs" />
     <Compile Include="Server.fs" />
     <Compile Include="Ocis.fs" />
+    <Compile Include="Host.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
@@ -28,6 +32,11 @@
   <ItemGroup>
     <PackageReference Include="FSharp.Data" Version="6.6.0" />
     <PackageReference Include="FSharp.SystemCommandLine" Version="2.0.0-beta5.5" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
     <PackageReference Include="System.IO.Pipelines" Version="9.0.6" />
   </ItemGroup>
 </Project>

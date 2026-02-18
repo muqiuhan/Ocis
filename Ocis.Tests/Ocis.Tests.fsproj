@@ -25,6 +25,10 @@
     <Compile Include="ErrorHandlingTests.fs" />
     <Compile Include="SequentialOperationTests.fs" />
     <Compile Include="BenchmarkEdgeCaseTests.fs" />
+    <Compile Include="DurabilityModeTests.fs" />
+    <Compile Include="WalCheckpointTests.fs" />
+    <Compile Include="CrashRecoveryTests.fs" />
+    <Compile Include="TestCategorizationTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

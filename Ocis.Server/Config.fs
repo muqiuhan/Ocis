@@ -6,6 +6,10 @@ type OcisConfig =
       L0CompactionThreshold: int
       LevelSizeMultiplier: int
       LogLevel: string
+      DurabilityMode: string
+      GroupCommitWindowMs: int
+      DbQueueCapacity: int
+      CheckpointMinIntervalMs: int
 
       Host: string
       Port: int
@@ -21,6 +25,10 @@ module ConfigHelper =
           L0CompactionThreshold = 4
           LevelSizeMultiplier = 5
           LogLevel = "Info"
+          DurabilityMode = "Balanced"
+          GroupCommitWindowMs = 5
+          DbQueueCapacity = 8192
+          CheckpointMinIntervalMs = 30000
 
           Host = "0.0.0.0"
           Port = 7379
@@ -40,6 +48,26 @@ module ConfigHelper =
             Error "L0CompactionThreshold must be greater than 0"
         elif config.LevelSizeMultiplier <= 0 then
             Error "LevelSizeMultiplier must be greater than 0"
+        elif
+            config.LogLevel <> "Debug"
+            && config.LogLevel <> "Info"
+            && config.LogLevel <> "Warn"
+            && config.LogLevel <> "Error"
+            && config.LogLevel <> "Fatal"
+        then
+            Error "LogLevel must be one of: Debug, Info, Warn, Error, Fatal"
+        elif
+            config.DurabilityMode <> "Strict"
+            && config.DurabilityMode <> "Balanced"
+            && config.DurabilityMode <> "Fast"
+        then
+            Error "DurabilityMode must be one of: Strict, Balanced, Fast"
+        elif config.GroupCommitWindowMs <= 0 then
+            Error "GroupCommitWindowMs must be greater than 0"
+        elif config.DbQueueCapacity <= 0 then
+            Error "DbQueueCapacity must be greater than 0"
+        elif config.CheckpointMinIntervalMs <= 0 then
+            Error "CheckpointMinIntervalMs must be greater than 0"
         elif config.ReceiveTimeout <= 0 then
             Error "ReceiveTimeout must be greater than 0"
         elif config.SendTimeout <= 0 then

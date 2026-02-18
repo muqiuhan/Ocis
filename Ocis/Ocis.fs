@@ -4,6 +4,7 @@ open Ocis.Memtbl
 open Ocis.SSTbl
 open Ocis.Valog
 open Ocis.WAL
+open Ocis.WalCommitCoordinator
 open System.IO
 open System
 open System.Text
@@ -37,7 +38,10 @@ type OcisDB
         ssTables: Map<int, SSTbl list>,
         valog: Valog,
         wal: Wal,
-        flushThreshold: int
+        flushThreshold: int,
+        durabilityMode: DurabilityMode,
+        groupCommitWindowMs: int,
+        durableFlushOverride: (unit -> unit) option
     ) =
     /// Number of Level 0 SSTables to trigger compaction.
     /// For write-intensive applications, this value can be appropriately increased to reduce the merge frequency.
@@ -55,6 +59,15 @@ type OcisDB
     let mutable immutableMemtbls = immutableMemtbls // Changed from immutableMemtbl
     let mutable valog = valog
     let mutable internalPendingRemappedLocations = Map.empty<int64, int64> // Internal mutable field
+    let writeLock = obj ()
+
+    let durableFlushAction =
+        match durableFlushOverride with
+        | Some flush -> flush
+        | None -> fun () -> wal.FlushDurable()
+
+    let walCommitCoordinator =
+        new WalCommitCoordinator(durabilityMode, groupCommitWindowMs, durableFlushAction)
 
     static member L0CompactionThreshold
         with get () = L0_COMPACTION_THRESHOLD
@@ -287,11 +300,16 @@ type OcisDB
     // Implement IDisposable for OcisDB to ensure all underlying resources are properly closed
     interface IDisposable with
         member this.Dispose() =
+            try
+                (walCommitCoordinator :> IDisposable).Dispose()
+            with _ ->
+                ()
+
             // Flush WAL before closing to ensure all data is persisted
             // Check if file stream is still open before flushing
             try
                 if this.WAL.FileStream.CanWrite then
-                    this.WAL.Flush()
+                    this.WAL.FlushDurable()
             with
             | :? System.ObjectDisposedException -> () // Already disposed, skip flush
             | _ -> () // Ignore other errors during disposal
@@ -804,6 +822,11 @@ type OcisDB
                         | Some currentList -> Some(sstbl :: currentList)
                         | None -> Some [ sstbl ])
 
+                try
+                    wal.Reset()
+                with ex ->
+                    Logger.Warn $"WAL reset skipped after checkpoint: {ex.Message}"
+
                 // After flushing, trigger compaction if needed
                 this.PerformCompaction()
             | None -> Logger.Error $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
@@ -1014,33 +1037,49 @@ type OcisDB
     /// </summary>
     /// <param name="dir">The directory where the database files are stored.</param>
     /// <returns>A Result type: Ok OcisDB instance if successful, otherwise an Error string.</returns>
-    static member Open(dir: string, flushThreshold: int) : Result<OcisDB, string> =
+    static member Open
+        (
+            dir: string,
+            flushThreshold: int,
+            ?durabilityMode: string,
+            ?groupCommitWindowMs: int,
+            ?durableFlushOverride: (unit -> unit)
+        )
+        : Result<OcisDB, string> =
         try
+            let durabilityModeValue = defaultArg durabilityMode "Balanced"
+            let groupCommitWindowMsValue = defaultArg groupCommitWindowMs 5
+
             // Validate inputs
             if System.String.IsNullOrWhiteSpace dir then
                 Error "Directory path cannot be null or empty"
             elif flushThreshold <= 0 then
                 Error $"Invalid flush threshold: {flushThreshold}. Must be greater than 0"
+            elif groupCommitWindowMsValue <= 0 then
+                Error "GroupCommitWindowMs must be greater than 0"
             else
-                Logger.Info $"Opening OcisDB at directory: {dir}"
+                match DurabilityMode.TryParse durabilityModeValue with
+                | Error msg -> Error msg
+                | Ok parsedDurabilityMode ->
+                    Logger.Info $"Opening OcisDB at directory: {dir}"
 
                 // Ensure the directory exists
-                let createDirResult =
-                    try
-                        if not (Directory.Exists dir) then
-                            Directory.CreateDirectory dir |> ignore
-                            Logger.Info $"Created database directory: {dir}"
+                    let createDirResult =
+                        try
+                            if not (Directory.Exists dir) then
+                                Directory.CreateDirectory dir |> ignore
+                                Logger.Info $"Created database directory: {dir}"
 
-                        Ok()
-                    with
-                    | :? System.IO.IOException as ioEx ->
-                        Error $"Failed to create database directory '{dir}': {ioEx.Message}"
-                    | :? System.UnauthorizedAccessException ->
-                        Error $"Access denied creating database directory '{dir}'"
+                            Ok()
+                        with
+                        | :? System.IO.IOException as ioEx ->
+                            Error $"Failed to create database directory '{dir}': {ioEx.Message}"
+                        | :? System.UnauthorizedAccessException ->
+                            Error $"Access denied creating database directory '{dir}'"
 
-                match createDirResult with
-                | Error msg -> Error msg
-                | Ok() ->
+                    match createDirResult with
+                    | Error msg -> Error msg
+                    | Ok() ->
 
                     // Create Valog
                     let valogPath = Path.Combine(dir, "valog.vlog")
@@ -1139,7 +1178,10 @@ type OcisDB
                                     loadedSSTables,
                                     valog,
                                     wal,
-                                    flushThreshold
+                                    flushThreshold,
+                                    parsedDurabilityMode,
+                                    groupCommitWindowMsValue,
+                                    durableFlushOverride
                                 )
 
                             Logger.Debug "OcisDB instance created successfully"
@@ -1248,17 +1290,20 @@ type OcisDB
             match this.EnsureValogAvailable() with
             | Error msg -> Error msg
             | Ok() ->
-                // 1. Write to ValueLog
-                let valueLocation = valog.Append(key, value)
+                lock writeLock (fun () ->
+                    // 1. Write to ValueLog
+                    let valueLocation = valog.Append(key, value)
 
-                // 2. Write to WAL
-                wal.Append(WalEntry.Set(key, valueLocation))
+                    // 2. Write to WAL
+                    wal.Append(WalEntry.Set(key, valueLocation))
 
-                // 3. Write to CurrentMemTable
-                currentMemtbl.Add(key, valueLocation)
+                    // 3. Write to CurrentMemTable
+                    currentMemtbl.Add(key, valueLocation)
 
-                // 4. Check MemTable size and trigger flush if needed
-                this.CheckAndFlushMemtable()
+                    // 4. Check MemTable size and trigger flush if needed
+                    this.CheckAndFlushMemtable())
+
+                walCommitCoordinator.AwaitDurableCommit()
 
                 Ok()
         with ex ->
@@ -1348,15 +1393,22 @@ type OcisDB
     /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
     member this.Delete(key: byte array) : Result<unit, string> =
         try
-            // 1. Write deletion marker to WAL
-            this.WAL.Append(WalEntry.Delete key)
+            // Ensure Valog is available
+            match this.EnsureValogAvailable() with
+            | Error msg -> Error msg
+            | Ok() ->
+                lock writeLock (fun () ->
+                    // 1. Write deletion marker to WAL
+                    this.WAL.Append(WalEntry.Delete key)
 
-            // 2. Add deletion marker to CurrentMemTable
-            currentMemtbl.Delete key // Memtbl.Delete already adds -1L
+                    // 2. Add deletion marker to CurrentMemTable
+                    currentMemtbl.Delete key // Memtbl.Delete already adds -1L
 
-            // Check MemTable size and trigger flush if needed (same logic as Set)
-            this.CheckAndFlushMemtable()
+                    // 3. Check MemTable size and trigger flush if needed (same logic as Set)
+                    this.CheckAndFlushMemtable())
 
-            Ok()
+                walCommitCoordinator.AwaitDurableCommit()
+
+                Ok()
         with ex ->
             Error $"Failed to delete key {Encoding.UTF8.GetString key}: {ex.Message}"

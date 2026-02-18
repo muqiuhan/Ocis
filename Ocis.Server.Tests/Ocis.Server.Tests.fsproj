@@ -12,6 +12,10 @@
     <Compile Include="ProtocolTests.fs" />
     <Compile Include="ClientTests.fs" />
     <Compile Include="IntegrationTests.fs" />
+    <Compile Include="DispatcherConcurrencyTests.fs" />
+    <Compile Include="ServerLifecycleTests.fs" />
+    <Compile Include="ShutdownAndResilienceTests.fs" />
+    <Compile Include="TelemetrySmokeTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

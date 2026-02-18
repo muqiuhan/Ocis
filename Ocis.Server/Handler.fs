@@ -2,20 +2,22 @@ module Ocis.Server.Handler
 
 open Ocis.Server.Protocol
 open Ocis.Server.ProtocolSpec
-open Ocis.OcisDB
+open Ocis.Server.DbDispatcher
+open Ocis.Server.Telemetry
 open Ocis.Utils.Logger
+open System.Diagnostics
 
 module RequestHandler =
 
     /// Handle a single request and return a response
-    let HandleRequest (db: OcisDB) (request: RequestPacket) : Async<ResponsePacket> =
+    let HandleRequest (dispatcher: OcisDbDispatcher) (request: RequestPacket) : Async<ResponsePacket> =
         async {
             try
                 match request.CommandType with
                 | CommandType.Set ->
                     match request.Value with
                     | Some value ->
-                        let result = db.Set(request.Key, value)
+                        let! result = dispatcher.DispatchSet(request.Key, value)
 
                         match result with
                         | Ok() ->
@@ -30,7 +32,7 @@ module RequestHandler =
                         return Protocol.CreateErrorResponse "SET command requires a value"
 
                 | CommandType.Get ->
-                    let result = db.Get request.Key
+                    let! result = dispatcher.DispatchGet request.Key
 
                     match result with
                     | Ok(Some value) ->
@@ -45,7 +47,7 @@ module RequestHandler =
                         return Protocol.CreateErrorResponse msg
 
                 | CommandType.Delete ->
-                    let result = db.Delete request.Key
+                    let! result = dispatcher.DispatchDelete request.Key
 
                     match result with
                     | Ok() ->
@@ -99,11 +101,20 @@ module RequestHandler =
             Ok()
 
     /// Process validated request
-    let ProcessValidRequest (db: OcisDB) (request: RequestPacket) : Async<ResponsePacket> =
+    let ProcessValidRequest (dispatcher: OcisDbDispatcher) (request: RequestPacket) : Async<ResponsePacket> =
         async {
-            match ValidateRequest request with
-            | Ok() -> return! HandleRequest db request
-            | Error msg ->
-                Logger.Warn $"Invalid request: {msg}"
-                return Protocol.CreateErrorResponse msg
+            let startTimestamp = Stopwatch.GetTimestamp()
+
+            let! response =
+                async {
+                    match ValidateRequest request with
+                    | Ok() -> return! HandleRequest dispatcher request
+                    | Error msg ->
+                        Logger.Warn $"Invalid request: {msg}"
+                        return Protocol.CreateErrorResponse msg
+                }
+
+            let durationMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds
+            RecordRequest response.StatusCode durationMs
+            return response
         }

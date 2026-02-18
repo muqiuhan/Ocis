@@ -1,10 +1,12 @@
-name: Build and Test
+name: Nightly Full Tests
 
-on: [push]
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 jobs:
-  build:
-
+  full-tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -16,16 +18,13 @@ jobs:
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: ${{ matrix.dotnet-version }}
-      - name: Set up Clang
-        uses: egor-tensin/setup-clang@v1
-        with:
-          version: latest
-          platform: x64
       - name: Install dependencies
         run: dotnet restore
       - name: Build
         run: dotnet build --configuration Release --no-restore
-      - name: Fast test suite (excludes Slow)
-        run: dotnet test --no-restore --verbosity normal --settings test.fast.runsettings
-      - name: Crash recovery gate
+      - name: Full test suite (including Slow)
+        run: dotnet test --no-restore --verbosity normal --settings test.all.runsettings
+      - name: Crash recovery suite
         run: dotnet test Ocis.Tests/Ocis.Tests.fsproj --no-restore --no-build --verbosity normal --filter "TestCategory=CrashRecovery"
+      - name: Soak smoke hook
+        run: bash scripts/soak-smoke.sh

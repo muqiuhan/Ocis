@@ -6,7 +6,7 @@ open System.Threading
 open Ocis.Server.ProtocolSpec
 open Ocis.Server.Protocol
 open Ocis.Server.Handler
-open Ocis.OcisDB
+open Ocis.Server.DbDispatcher
 open Ocis.Utils.Logger
 
 /// Connection state
@@ -16,7 +16,7 @@ type ConnectionState =
     | Error of string
 
 /// Connection manager
-type Connection(socket: Socket, db: OcisDB, connectionId: string) =
+type Connection(socket: Socket, dispatcher: OcisDbDispatcher, connectionId: string) =
     let mutable state = ConnectionState.Connected
     let mutable isDisposed = false
     let cancellationTokenSource = new CancellationTokenSource()
@@ -29,6 +29,7 @@ type Connection(socket: Socket, db: OcisDB, connectionId: string) =
     member this.HandleAsync() =
         async {
             try
+                use _connectionScope = Logger.BeginScope $"connectionId={connectionId}"
                 Logger.Debug $"Connection {connectionId} started"
 
                 // Create network stream
@@ -36,13 +37,18 @@ type Connection(socket: Socket, db: OcisDB, connectionId: string) =
 
                 // Message processing loop
                 let mutable continueProcessing = true
+                let mutable requestOrdinal = 0
 
                 while continueProcessing
                       && not cancellationTokenSource.Token.IsCancellationRequested
                       && socket.Connected do
                     match! this.ReadMessageAsync networkStream with
                     | Some request ->
-                        let! response = RequestHandler.ProcessValidRequest db request
+                        requestOrdinal <- requestOrdinal + 1
+                        let requestId = $"{connectionId}-{requestOrdinal}"
+                        use _requestScope = Logger.BeginScope $"connectionId={connectionId} requestId={requestId}"
+                        let! response = RequestHandler.ProcessValidRequest dispatcher request
+                        Logger.Debug $"Processed request with status={response.StatusCode}"
                         do! this.SendResponseAsync(networkStream, response)
                     | None ->
                         continueProcessing <- false
@@ -174,9 +180,9 @@ type Connection(socket: Socket, db: OcisDB, connectionId: string) =
 module ConnectionManager =
 
     /// Create new connection
-    let createConnection (socket: Socket) (db: OcisDB) : Connection =
+    let createConnection (socket: Socket) (dispatcher: OcisDbDispatcher) : Connection =
         let connectionId = Guid.NewGuid().ToString("N").[..7]
-        new Connection(socket, db, connectionId)
+        new Connection(socket, dispatcher, connectionId)
 
     /// Start connection handling
     let startConnection (connection: Connection) =

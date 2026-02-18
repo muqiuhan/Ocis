@@ -13,6 +13,7 @@
     <Compile Include="SSTbl.fs" />
     <Compile Include="Valog.fs" />
     <Compile Include="WAL.fs" />
+    <Compile Include="WalCommitCoordinator.fs" />
     <Compile Include="Ocis.fs" />
   </ItemGroup>
   <ItemGroup>

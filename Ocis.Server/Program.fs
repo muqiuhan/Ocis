@@ -2,11 +2,92 @@
 
 open FSharp.SystemCommandLine
 open Input
+open Microsoft.Extensions.Configuration
+open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.Options
 open Ocis.Server.Config
-open Ocis.Server.Ocis
+open Ocis.Server.Host
+open Ocis.Utils.Logger
+
+let private runWithHost (config: OcisConfig) =
+    let options = OcisServerOptions.FromConfig config
+
+    let hostBuilder =
+        Host
+            .CreateDefaultBuilder()
+            .ConfigureServices(fun _ services ->
+                services.AddSingleton<IOptions<OcisServerOptions>>(Options.Create(options))
+                |> ignore
+                services.AddHostedService<OcisHostedService>() |> ignore)
+
+    try
+        use host = hostBuilder.Build()
+        host.Run()
+        0
+    with ex ->
+        Logger.Error $"Host startup failed: {ex.Message}"
+        1
+
+let validateLogLevelOption level =
+    match level with
+    | Some "Debug"
+    | Some "Info"
+    | Some "Warn"
+    | Some "Error"
+    | Some "Fatal"
+    | None -> Ok()
+    | Some _ -> Error "Log level must be one of: Debug, Info, Warn, Error, Fatal"
 
 [<EntryPoint>]
 let main argv =
+    let durabilityModeInput =
+        optionMaybe "--durability-mode"
+        |> desc "Durability mode: Strict, Balanced, Fast (default: Balanced)"
+        |> validate (fun mode ->
+            match mode with
+            | Some "Strict"
+            | Some "Balanced"
+            | Some "Fast"
+            | None -> Ok()
+            | Some _ -> Error "Durability mode must be one of: Strict, Balanced, Fast")
+
+    let groupCommitWindowMsInput =
+        optionMaybe "--group-commit-window-ms"
+        |> desc "Group commit window in milliseconds (default: 5)"
+        |> validate (fun value ->
+            match value with
+            | Some value when value > 0 -> Ok()
+            | Some _ -> Error "Group commit window must be greater than 0"
+            | None -> Ok())
+
+    let dbQueueCapacityInput =
+        optionMaybe "--db-queue-capacity"
+        |> desc "Database queue capacity (default: 8192)"
+        |> validate (fun value ->
+            match value with
+            | Some value when value > 0 -> Ok()
+            | Some _ -> Error "DB queue capacity must be greater than 0"
+            | None -> Ok())
+
+    let checkpointMinIntervalMsInput =
+        optionMaybe "--checkpoint-min-interval-ms"
+        |> desc "Minimum checkpoint interval in milliseconds (default: 30000)"
+        |> validate (fun value ->
+            match value with
+            | Some value when value > 0 -> Ok()
+            | Some _ -> Error "Checkpoint minimum interval must be greater than 0"
+            | None -> Ok())
+
+    let maxConnectionsInput =
+        optionMaybe "--max-connections"
+        |> desc "Maximum concurrent connections (default: 1000)"
+        |> validate (fun maxConn ->
+            match maxConn with
+            | Some maxConn when maxConn > 0 -> Ok()
+            | Some _ -> Error "Max connections must be greater than 0"
+            | None -> Ok())
+
     rootCommand argv {
         description "A cross-platform, robust asynchronous WiscKey storage engine with TCP server."
 
@@ -46,23 +127,9 @@ let main argv =
 
             optionMaybe "--log-level"
             |> desc "Log level: Debug, Info, Warn, Error, Fatal (default: Info)"
-            |> validate (fun level ->
-                Option.bind
-                    (fun level ->
-                        match level with
-                        | "Debug"
-                        | "Info"
-                        | "Warn"
-                        | "Error"
-                        | "Fatal" -> Some level
-                        | _ -> None)
-                    level
-                |> Option.isSome
-                |> function
-                    | true -> Ok()
-                    | false -> Ok()),
+            |> validate validateLogLevelOption,
 
-            optionMaybe "--host"
+            optionMaybe<string> "--host"
             |> desc "Server host address (default: 0.0.0.0)"
             |> validate (fun host ->
                 match host with
@@ -77,14 +144,14 @@ let main argv =
                 | Some _ -> Error "Port must be between 1 and 65535"
                 | None -> Ok()),
 
-            optionMaybe "--max-connections"
-            |> desc "Maximum concurrent connections (default: 1000)"
-            |> validate (fun maxConn ->
-                match maxConn with
-                | Some maxConn when maxConn > 0 -> Ok()
-                | Some _ -> Error "Max connections must be greater than 0"
-                | None -> Ok())
+            context
         )
+
+        addInput maxConnectionsInput
+        addInput durabilityModeInput
+        addInput groupCommitWindowMsInput
+        addInput dbQueueCapacityInput
+        addInput checkpointMinIntervalMsInput
 
         setAction
             (fun
@@ -95,21 +162,28 @@ let main argv =
                  logLevel,
                  host,
                  port,
-                 maxConnections) ->
-                {
-                  // Database configuration
-                  Dir = workingDir.FullName
-                  FlushThreshold = flushThreshold |> Option.defaultValue 1000
-                  L0CompactionThreshold = l0CompactionThreshold |> Option.defaultValue 4
-                  LevelSizeMultiplier = levelSizeMultiplier |> Option.defaultValue 5
-                  LogLevel = logLevel |> Option.defaultValue "Info"
+                 actionContext) ->
+                let maxConnections = maxConnectionsInput.GetValue actionContext.ParseResult
+                let durabilityMode = durabilityModeInput.GetValue actionContext.ParseResult
+                let groupCommitWindowMs = groupCommitWindowMsInput.GetValue actionContext.ParseResult
+                let dbQueueCapacity = dbQueueCapacityInput.GetValue actionContext.ParseResult
+                let checkpointMinIntervalMs = checkpointMinIntervalMsInput.GetValue actionContext.ParseResult
 
-                  // Network configuration (using default values)
-                  Host = host |> Option.defaultValue "0.0.0.0"
-                  Port = port |> Option.defaultValue 7379
-                  MaxConnections = maxConnections |> Option.defaultValue 1000
-                  ReceiveTimeout = 30000 // Default 30 seconds
-                  SendTimeout = 30000 // Default 30 seconds
-                }
-                |> Ocis.Run)
+                let config: OcisConfig =
+                    { Dir = workingDir.FullName
+                      FlushThreshold = flushThreshold |> Option.defaultValue 1000
+                      L0CompactionThreshold = l0CompactionThreshold |> Option.defaultValue 4
+                      LevelSizeMultiplier = levelSizeMultiplier |> Option.defaultValue 5
+                      LogLevel = logLevel |> Option.defaultValue "Info"
+                      DurabilityMode = durabilityMode |> Option.defaultValue "Balanced"
+                      GroupCommitWindowMs = groupCommitWindowMs |> Option.defaultValue 5
+                      DbQueueCapacity = dbQueueCapacity |> Option.defaultValue 8192
+                      CheckpointMinIntervalMs = checkpointMinIntervalMs |> Option.defaultValue 30000
+                      Host = host |> Option.defaultValue "0.0.0.0"
+                      Port = port |> Option.defaultValue 7379
+                      MaxConnections = maxConnections |> Option.defaultValue 1000
+                      ReceiveTimeout = 30000
+                      SendTimeout = 30000 }
+
+                runWithHost config)
     }

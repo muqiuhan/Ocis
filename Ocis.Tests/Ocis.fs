@@ -221,6 +221,7 @@ type OcisDBTests() =
         | Error msg -> Assert.Fail $"Failed to open DB: {msg}"
 
     [<Test>]
+    [<Category("Slow")>]
     [<TestCase(1000)>]
     [<TestCase(10000)>]
     [<TestCase(100000)>]
