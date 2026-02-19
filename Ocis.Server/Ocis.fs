@@ -135,7 +135,8 @@ module Ocis =
                     config.Dir,
                     config.FlushThreshold,
                     durabilityMode = config.DurabilityMode,
-                    groupCommitWindowMs = config.GroupCommitWindowMs
+                    groupCommitWindowMs = config.GroupCommitWindowMs,
+                    groupCommitBatchSize = config.GroupCommitBatchSize
                 )
             with
             | Ok db ->

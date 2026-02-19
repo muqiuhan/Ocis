@@ -18,10 +18,18 @@ module DurabilityMode =
         | value when value.Equals("Fast", StringComparison.OrdinalIgnoreCase) -> Ok Fast
         | _ -> Error "DurabilityMode must be one of: Strict, Balanced, Fast"
 
-type WalCommitCoordinator(mode: DurabilityMode, groupCommitWindowMs: int, durableFlush: unit -> unit) =
+type WalCommitCoordinator(
+    mode: DurabilityMode,
+    groupCommitWindowMs: int,
+    groupCommitBatchSize: int,
+    durableFlush: unit -> unit
+) =
     do
         if mode = Balanced && groupCommitWindowMs <= 0 then
             invalidArg "groupCommitWindowMs" "groupCommitWindowMs must be greater than 0"
+
+        if mode = Balanced && groupCommitBatchSize <= 0 then
+            invalidArg "groupCommitBatchSize" "groupCommitBatchSize must be greater than 0"
 
     let gate = obj ()
     let pending = ResizeArray<TaskCompletionSource<unit>>()
@@ -85,13 +93,29 @@ type WalCommitCoordinator(mode: DurabilityMode, groupCommitWindowMs: int, durabl
         | Balanced ->
             let waiter = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
 
-            lock gate (fun () ->
-                if disposed then
-                    raise (ObjectDisposedException(nameof WalCommitCoordinator))
+            let shouldFlushImmediately =
+                lock gate (fun () ->
+                    if disposed then
+                        raise (ObjectDisposedException(nameof WalCommitCoordinator))
 
-                pending.Add waiter)
+                    pending.Add waiter
 
-            ensureTimerScheduled ()
+                    if pending.Count >= groupCommitBatchSize then
+                        flushScheduled <- false
+
+                        match timer with
+                        | Some activeTimer -> activeTimer.Change(Timeout.Infinite, Timeout.Infinite) |> ignore
+                        | None -> ()
+
+                        true
+                    else
+                        false)
+
+            if shouldFlushImmediately then
+                flushPendingBatch ()
+            else
+                ensureTimerScheduled ()
+
             waiter.Task.GetAwaiter().GetResult()
 
     interface IDisposable with

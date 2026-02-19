@@ -3,6 +3,7 @@ module Ocis.Valog
 open System
 open System.IO
 open System.Buffers
+open Ocis.ThreadAffinity
 open Ocis.Utils.Logger
 open Ocis.Utils.Serialization
 
@@ -71,6 +72,9 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     let mutable head: int64 = head
     /// The position of the oldest valid value (for garbage collection). Data before this position is considered garbage.
     let mutable tail: int64 = tail
+    let threadOwner = ThreadOwner.CaptureOwnerThread()
+
+    member _.BindToCurrentThread() = threadOwner.RebindOwnerThread("Valog.BindToCurrentThread")
 
     member _.Path = path
     member _.FileStream = fileStream
@@ -218,6 +222,8 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     /// <param name="value">The value to append.</param>
     /// <returns>The ValueLocation (offset) of the entry written.</returns>
     member _.Append(key: byte array, value: byte array) : int64 =
+        threadOwner.AssertOwnerThread("Valog.Append")
+
         // Single-threaded implementation optimized for performance.
         // Record the offset at which this new entry will start, which will be returned as ValueLocation.
         let entryStartOffset = head
@@ -242,6 +248,8 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     /// <param name="location">The ValueLocation (offset) to read.</param>
     /// <returns>An Option type: if found and valid, returns Some (key, value), otherwise returns None.</returns>
     member _.Read(location: int64) : (byte array * byte array) option =
+        threadOwner.AssertOwnerThread("Valog.Read")
+
         // Single-threaded implementation optimized for performance.
         // Basic range check: ensure the position is within the valid range of the Value Log
         // (after Tail and before Head).
@@ -335,6 +343,8 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     /// <param name="location">The ValueLocation (offset) to read.</param>
     /// <returns>An Option type: if found and valid, returns Some value, otherwise returns None.</returns>
     member _.ReadValueOnly(location: int64) : byte array option =
+        threadOwner.AssertOwnerThread("Valog.ReadValueOnly")
+
         // Basic range check: ensure the position is within the valid range of the Value Log
         // (after Tail and before Head).
         if location < tail || location >= head then

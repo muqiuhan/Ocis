@@ -8,6 +8,7 @@ type OcisConfig =
       LogLevel: string
       DurabilityMode: string
       GroupCommitWindowMs: int
+      GroupCommitBatchSize: int
       DbQueueCapacity: int
       CheckpointMinIntervalMs: int
 
@@ -27,6 +28,7 @@ module ConfigHelper =
           LogLevel = "Info"
           DurabilityMode = "Balanced"
           GroupCommitWindowMs = 5
+          GroupCommitBatchSize = 64
           DbQueueCapacity = 8192
           CheckpointMinIntervalMs = 30000
 
@@ -64,6 +66,8 @@ module ConfigHelper =
             Error "DurabilityMode must be one of: Strict, Balanced, Fast"
         elif config.GroupCommitWindowMs <= 0 then
             Error "GroupCommitWindowMs must be greater than 0"
+        elif config.GroupCommitBatchSize <= 0 then
+            Error "GroupCommitBatchSize must be greater than 0"
         elif config.DbQueueCapacity <= 0 then
             Error "DbQueueCapacity must be greater than 0"
         elif config.CheckpointMinIntervalMs <= 0 then

@@ -18,6 +18,7 @@ type OcisServerOptions =
       LogLevel: string
       DurabilityMode: string
       GroupCommitWindowMs: int
+      GroupCommitBatchSize: int
       DbQueueCapacity: int
       CheckpointMinIntervalMs: int
       Host: string
@@ -38,6 +39,7 @@ module OcisServerOptions =
           LogLevel = config.LogLevel
           DurabilityMode = config.DurabilityMode
           GroupCommitWindowMs = config.GroupCommitWindowMs
+          GroupCommitBatchSize = config.GroupCommitBatchSize
           DbQueueCapacity = config.DbQueueCapacity
           CheckpointMinIntervalMs = config.CheckpointMinIntervalMs
           Host = config.Host
@@ -54,6 +56,7 @@ module OcisServerOptions =
           LogLevel = options.LogLevel
           DurabilityMode = options.DurabilityMode
           GroupCommitWindowMs = options.GroupCommitWindowMs
+          GroupCommitBatchSize = options.GroupCommitBatchSize
           DbQueueCapacity = options.DbQueueCapacity
           CheckpointMinIntervalMs = options.CheckpointMinIntervalMs
           Host = options.Host
@@ -73,6 +76,7 @@ module OcisServerOptions =
         values.Add($"{SectionName}:LogLevel", options.LogLevel)
         values.Add($"{SectionName}:DurabilityMode", options.DurabilityMode)
         values.Add($"{SectionName}:GroupCommitWindowMs", string options.GroupCommitWindowMs)
+        values.Add($"{SectionName}:GroupCommitBatchSize", string options.GroupCommitBatchSize)
         values.Add($"{SectionName}:DbQueueCapacity", string options.DbQueueCapacity)
         values.Add($"{SectionName}:CheckpointMinIntervalMs", string options.CheckpointMinIntervalMs)
         values.Add($"{SectionName}:Host", options.Host)

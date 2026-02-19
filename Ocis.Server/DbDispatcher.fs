@@ -33,13 +33,17 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
             else
                 0)
 
-    let workerTask =
-        task {
+    let workerCompletion =
+        TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let workerThread =
+        Thread(ThreadStart(fun () ->
             try
+                db.BindToCurrentThread()
                 let mutable keepRunning = true
 
                 while keepRunning do
-                    let! canRead = channel.Reader.WaitToReadAsync(cancellation.Token).AsTask()
+                    let canRead = channel.Reader.WaitToReadAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
 
                     if canRead then
                         let mutable nextItem = Unchecked.defaultof<DbWorkItem>
@@ -49,12 +53,17 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
                     else
                         keepRunning <- false
 
+                workerCompletion.TrySetResult() |> ignore
             with
             | :? OperationCanceledException ->
-                ()
+                workerCompletion.TrySetResult() |> ignore
             | ex ->
-                return raise ex
-        }
+                workerCompletion.TrySetException ex |> ignore))
+
+    do
+        workerThread.IsBackground <- true
+        workerThread.Name <- "ocis-db-dispatcher"
+        workerThread.Start()
 
     member private _.TryDispatch<'T>(work: OcisDB -> Result<'T, string>) : Async<Result<'T, string>> =
         async {
@@ -99,7 +108,7 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
                     stopped <- true
                     channel.Writer.TryComplete() |> ignore)
 
-            do! workerTask |> Async.AwaitTask
+            do! workerCompletion.Task |> Async.AwaitTask
         }
 
     interface IDisposable with

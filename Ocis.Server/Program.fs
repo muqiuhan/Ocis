@@ -61,6 +61,15 @@ let main argv =
             | Some _ -> Error "Group commit window must be greater than 0"
             | None -> Ok())
 
+    let groupCommitBatchSizeInput =
+        optionMaybe "--group-commit-batch-size"
+        |> desc "Group commit batch size (default: 64)"
+        |> validate (fun value ->
+            match value with
+            | Some value when value > 0 -> Ok()
+            | Some _ -> Error "Group commit batch size must be greater than 0"
+            | None -> Ok())
+
     let dbQueueCapacityInput =
         optionMaybe "--db-queue-capacity"
         |> desc "Database queue capacity (default: 8192)"
@@ -150,6 +159,7 @@ let main argv =
         addInput maxConnectionsInput
         addInput durabilityModeInput
         addInput groupCommitWindowMsInput
+        addInput groupCommitBatchSizeInput
         addInput dbQueueCapacityInput
         addInput checkpointMinIntervalMsInput
 
@@ -166,6 +176,7 @@ let main argv =
                 let maxConnections = maxConnectionsInput.GetValue actionContext.ParseResult
                 let durabilityMode = durabilityModeInput.GetValue actionContext.ParseResult
                 let groupCommitWindowMs = groupCommitWindowMsInput.GetValue actionContext.ParseResult
+                let groupCommitBatchSize = groupCommitBatchSizeInput.GetValue actionContext.ParseResult
                 let dbQueueCapacity = dbQueueCapacityInput.GetValue actionContext.ParseResult
                 let checkpointMinIntervalMs = checkpointMinIntervalMsInput.GetValue actionContext.ParseResult
 
@@ -177,6 +188,7 @@ let main argv =
                       LogLevel = logLevel |> Option.defaultValue "Info"
                       DurabilityMode = durabilityMode |> Option.defaultValue "Balanced"
                       GroupCommitWindowMs = groupCommitWindowMs |> Option.defaultValue 5
+                      GroupCommitBatchSize = groupCommitBatchSize |> Option.defaultValue 64
                       DbQueueCapacity = dbQueueCapacity |> Option.defaultValue 8192
                       CheckpointMinIntervalMs = checkpointMinIntervalMs |> Option.defaultValue 30000
                       Host = host |> Option.defaultValue "0.0.0.0"

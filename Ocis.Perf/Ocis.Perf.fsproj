@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Models.fs" />
+    <Compile Include="Stats.fs" />
+    <Compile Include="Aggregation.fs" />
+    <Compile Include="EngineRunner.fs" />
+    <Compile Include="ServerProtocolClient.fs" />
+    <Compile Include="ServerRunner.fs" />
+    <Compile Include="ReportWriter.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ocis\Ocis.fsproj" />
+    <ProjectReference Include="..\Ocis.Server\Ocis.Server.fsproj" />
+  </ItemGroup>
+
+</Project>

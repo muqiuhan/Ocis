@@ -62,6 +62,7 @@ type IntegrationTests() =
         Assert.That(config.SendTimeout, Is.EqualTo 30000)
         Assert.That(config.DurabilityMode, Is.EqualTo "Balanced")
         Assert.That(config.GroupCommitWindowMs, Is.EqualTo 5)
+        Assert.That(config.GroupCommitBatchSize, Is.EqualTo 64)
         Assert.That(config.DbQueueCapacity, Is.EqualTo 8192)
         Assert.That(config.CheckpointMinIntervalMs, Is.EqualTo 30000)
 
@@ -82,6 +83,15 @@ type IntegrationTests() =
         match ConfigHelper.ValidateConfig badConfig with
         | Ok() -> Assert.Fail "Invalid group commit window should fail validation"
         | Error _ -> Assert.Pass "Invalid group commit window correctly failed validation"
+
+    [<Test>]
+    member this.TestInvalidGroupCommitBatchSizeZero() =
+        let invalidConfig = ConfigHelper.CreateDefault testDbDir
+        let badConfig = { invalidConfig with GroupCommitBatchSize = 0 }
+
+        match ConfigHelper.ValidateConfig badConfig with
+        | Ok() -> Assert.Fail "Invalid group commit batch size should fail validation"
+        | Error msg -> Assert.That(msg, Is.EqualTo "GroupCommitBatchSize must be greater than 0")
 
     [<Test>]
     member this.TestInvalidDbQueueCapacityZero() =

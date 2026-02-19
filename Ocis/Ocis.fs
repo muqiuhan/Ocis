@@ -12,6 +12,7 @@ open Ocis.ValueLocation
 open FSharp.Collections
 open Ocis.Utils.Logger
 open Ocis.Errors
+open Ocis.ThreadAffinity
 
 // Compaction strategy types - simplified for single-threaded operation
 type CompactionPriority =
@@ -41,6 +42,7 @@ type OcisDB
         flushThreshold: int,
         durabilityMode: DurabilityMode,
         groupCommitWindowMs: int,
+        groupCommitBatchSize: int,
         durableFlushOverride: (unit -> unit) option
     ) =
     /// Number of Level 0 SSTables to trigger compaction.
@@ -60,6 +62,7 @@ type OcisDB
     let mutable valog = valog
     let mutable internalPendingRemappedLocations = Map.empty<int64, int64> // Internal mutable field
     let writeLock = obj ()
+    let threadOwner = ThreadOwner.CaptureOwnerThread()
 
     let durableFlushAction =
         match durableFlushOverride with
@@ -67,7 +70,7 @@ type OcisDB
         | None -> fun () -> wal.FlushDurable()
 
     let walCommitCoordinator =
-        new WalCommitCoordinator(durabilityMode, groupCommitWindowMs, durableFlushAction)
+        new WalCommitCoordinator(durabilityMode, groupCommitWindowMs, groupCommitBatchSize, durableFlushAction)
 
     static member L0CompactionThreshold
         with get () = L0_COMPACTION_THRESHOLD
@@ -296,6 +299,13 @@ type OcisDB
         and private set (m: Map<int64, int64>) = internalPendingRemappedLocations <- m
 
     member _.WAL = wal
+
+    member private _.AssertOwnerThread(operationName: string) : unit =
+        threadOwner.AssertOwnerThread(operationName)
+
+    member _.BindToCurrentThread() : unit =
+        threadOwner.RebindOwnerThread("OcisDB.BindToCurrentThread")
+        valog.BindToCurrentThread()
 
     // Implement IDisposable for OcisDB to ensure all underlying resources are properly closed
     interface IDisposable with
@@ -540,6 +550,8 @@ type OcisDB
     /// Performs optimized compaction for Level 0 SSTables.
     /// </summary>
     member this.CompactLevel0() : unit =
+        this.AssertOwnerThread("CompactLevel0")
+
         let level0SSTablesOption = this.SSTables |> Map.tryFind 0
 
         match level0SSTablesOption with
@@ -658,6 +670,8 @@ type OcisDB
     /// Performs optimized compaction for levels greater than 0.
     /// </summary>
     member this.CompactLevel(level: int) : unit =
+        this.AssertOwnerThread("CompactLevel")
+
         let nextLevel = level + 1
 
         // Use intelligent selection strategy
@@ -728,6 +742,8 @@ type OcisDB
     /// Performs compaction operations in single-threaded mode for maximum performance.
     /// </summary>
     member this.PerformCompaction() : unit =
+        this.AssertOwnerThread("PerformCompaction")
+
         // Always try Level 0 first (highest priority)
         this.CompactLevel0()
 
@@ -739,6 +755,8 @@ type OcisDB
     /// Performs recompaction for remapped value locations.
     /// </summary>
     member this.PerformRecompactionForRemapped(remappedLocations: Map<int64, int64>) : unit =
+        this.AssertOwnerThread("PerformRecompactionForRemapped")
+
         Logger.Debug $"Starting recompaction request for {remappedLocations.Count} remapped locations."
 
         // Selective recompaction: only recompact SSTables that contain remapped values
@@ -801,6 +819,8 @@ type OcisDB
     /// Flushes a memtable to SSTable synchronously.
     /// </summary>
     member this.FlushMemtableToSSTable(memtblToFlush: Memtbl) : unit =
+        this.AssertOwnerThread("FlushMemtableToSSTable")
+
         // Ensure WAL is flushed to disk before flushing memtable to SSTable
         // This guarantees durability: if system crashes, WAL can be replayed to recover data
         wal.Flush()
@@ -845,6 +865,8 @@ type OcisDB
     /// Performs garbage collection synchronously in single-threaded mode.
     /// </summary>
     member this.PerformGarbageCollection() : unit =
+        this.AssertOwnerThread("PerformGarbageCollection")
+
         Async.RunSynchronously
         <| async {
             Logger.Info "Starting garbage collection"
@@ -972,6 +994,8 @@ type OcisDB
     /// more aggressive garbage collection.
     /// </summary>
     member this.UpdateValogTail() : unit =
+        this.AssertOwnerThread("UpdateValogTail")
+
         try
             let currentTail = this.ValueLog.Tail
             let dbRef = ref this // Create a reference to self for static method
@@ -1043,12 +1067,14 @@ type OcisDB
             flushThreshold: int,
             ?durabilityMode: string,
             ?groupCommitWindowMs: int,
+            ?groupCommitBatchSize: int,
             ?durableFlushOverride: (unit -> unit)
         )
         : Result<OcisDB, string> =
         try
             let durabilityModeValue = defaultArg durabilityMode "Balanced"
             let groupCommitWindowMsValue = defaultArg groupCommitWindowMs 5
+            let groupCommitBatchSizeValue = defaultArg groupCommitBatchSize 64
 
             // Validate inputs
             if System.String.IsNullOrWhiteSpace dir then
@@ -1057,6 +1083,8 @@ type OcisDB
                 Error $"Invalid flush threshold: {flushThreshold}. Must be greater than 0"
             elif groupCommitWindowMsValue <= 0 then
                 Error "GroupCommitWindowMs must be greater than 0"
+            elif groupCommitBatchSizeValue <= 0 then
+                Error "GroupCommitBatchSize must be greater than 0"
             else
                 match DurabilityMode.TryParse durabilityModeValue with
                 | Error msg -> Error msg
@@ -1181,6 +1209,7 @@ type OcisDB
                                     flushThreshold,
                                     parsedDurabilityMode,
                                     groupCommitWindowMsValue,
+                                    groupCommitBatchSizeValue,
                                     durableFlushOverride
                                 )
 
@@ -1285,6 +1314,8 @@ type OcisDB
     /// <param name="value">The value to associate with the key.</param>
     /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
     member this.Set(key: byte array, value: byte array) : Result<unit, string> =
+        this.AssertOwnerThread("Set")
+
         try
             // Ensure Valog is available
             match this.EnsureValogAvailable() with
@@ -1327,6 +1358,8 @@ type OcisDB
     /// <param name="key">The key to retrieve.</param>
     /// <returns>A Result: Ok (Some value) if found, Ok None if not found, otherwise an Error string.</returns>
     member this.Get(key: byte array) : Result<byte array option, string> =
+        this.AssertOwnerThread("Get")
+
         try
             // Ensure Valog is available
             match this.EnsureValogAvailable() with
@@ -1392,6 +1425,8 @@ type OcisDB
     /// <param name="key">The key to delete.</param>
     /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
     member this.Delete(key: byte array) : Result<unit, string> =
+        this.AssertOwnerThread("Delete")
+
         try
             // Ensure Valog is available
             match this.EnsureValogAvailable() with

@@ -8,6 +8,7 @@ open System.Threading
 open System.Threading.Tasks
 open NUnit.Framework
 open Ocis.OcisDB
+open Ocis.WalCommitCoordinator
 
 [<TestFixture>]
 type DurabilityModeTests() =
@@ -90,7 +91,7 @@ type DurabilityModeTests() =
         Assert.That(flushCount, Is.EqualTo 2)
 
     [<Test>]
-    member _.BalancedMode_BatchesConcurrentSetsIntoOneDurableFlush() =
+    member _.BalancedMode_RejectsCrossThreadSetWithThreadAffinityViolation() =
         let mutable flushCount = 0
 
         let durableFlushOverride () =
@@ -99,19 +100,16 @@ type DurabilityModeTests() =
 
         use db = openDb "Balanced" 60 durableFlushOverride
 
-        let set1 =
+        let crossThreadSet =
             Task.Run(fun () -> db.Set(Encoding.UTF8.GetBytes "balanced-key-1", Encoding.UTF8.GetBytes "v1"))
 
-        Thread.Sleep 10
+        let ex = Assert.Throws<AggregateException>(fun () -> crossThreadSet.Wait())
+        let baseEx = ex.GetBaseException()
 
-        let set2 =
-            Task.Run(fun () -> db.Set(Encoding.UTF8.GetBytes "balanced-key-2", Encoding.UTF8.GetBytes "v2"))
-
-        let completed = Task.WaitAll([| set1 :> Task; set2 :> Task |], 2000)
-        Assert.That(completed, Is.True, "Balanced mode writes should complete in bounded time")
-        Assert.That(set1.Result.IsOk, Is.True)
-        Assert.That(set2.Result.IsOk, Is.True)
-        Assert.That(flushCount, Is.EqualTo 1)
+        Assert.That(baseEx :? InvalidOperationException, Is.True)
+        Assert.That(baseEx.Message, Does.Contain "owner thread")
+        Assert.That(baseEx.Message, Does.Contain "Set")
+        Assert.That(flushCount, Is.EqualTo 0)
 
     [<Test>]
     member _.FastMode_RemainsCompatibleWithoutPerRequestDurableWait() =
@@ -133,7 +131,7 @@ type DurabilityModeTests() =
         | Error msg -> Assert.Fail $"Get failed: {msg}"
 
     [<Test>]
-    member _.BalancedMode_DisposeDoesNotHangWithPendingWrites() =
+    member _.BalancedMode_DisposeDoesNotHangAfterCrossThreadViolation() =
         let mutable flushCount = 0
 
         let durableFlushOverride () =
@@ -149,7 +147,45 @@ type DurabilityModeTests() =
 
         let disposeTask = Task.Run(fun () -> (db :> IDisposable).Dispose())
 
-        let completed = Task.WaitAll([| pendingSet :> Task; disposeTask |], 3000)
-        Assert.That(completed, Is.True, "Dispose should drain pending group-commit writes")
-        Assert.That(pendingSet.Result.IsOk, Is.True)
-        Assert.That(flushCount, Is.GreaterThanOrEqualTo 1)
+        let mutable waitRaisedAggregate = false
+
+        try
+            Task.WaitAll([| pendingSet :> Task; disposeTask |], 3000) |> ignore
+        with :? AggregateException ->
+            waitRaisedAggregate <- true
+
+        Assert.That(waitRaisedAggregate, Is.True)
+        Assert.That(pendingSet.IsCompleted, Is.True)
+        Assert.That(disposeTask.IsCompleted, Is.True, "Dispose should complete even after a cross-thread access violation")
+        Assert.That(pendingSet.IsFaulted, Is.True)
+        Assert.That(pendingSet.Exception.GetBaseException() :? InvalidOperationException, Is.True)
+        Assert.That(flushCount, Is.EqualTo 0)
+
+    [<Test>]
+    member _.BalancedCoordinator_FlushesImmediatelyWhenBatchSizeReached() =
+        let mutable flushCount = 0
+
+        let durableFlushOverride () =
+            Interlocked.Increment(&flushCount) |> ignore
+
+        use coordinator =
+            new WalCommitCoordinator(DurabilityMode.Balanced, 2000, 3, durableFlushOverride)
+
+        use startGate = new ManualResetEventSlim(false)
+
+        let waiters =
+            [| 1..3 |]
+            |> Array.map (fun _ ->
+                Task.Run(fun () ->
+                    startGate.Wait()
+                    coordinator.AwaitDurableCommit()))
+
+        let sw = Stopwatch.StartNew()
+        startGate.Set()
+
+        let completed = Task.WaitAll(waiters, 1000)
+        sw.Stop()
+
+        Assert.That(completed, Is.True, "Batch-size trigger should complete before timer window")
+        Assert.That(sw.ElapsedMilliseconds, Is.LessThan 1500L)
+        Assert.That(flushCount, Is.EqualTo 1)

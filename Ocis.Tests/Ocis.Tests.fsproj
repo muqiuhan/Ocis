@@ -29,6 +29,7 @@
     <Compile Include="WalCheckpointTests.fs" />
     <Compile Include="CrashRecoveryTests.fs" />
     <Compile Include="TestCategorizationTests.fs" />
+    <Compile Include="ThreadAffinityTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
