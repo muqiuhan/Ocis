@@ -17,13 +17,19 @@ module RequestHandler =
                 | CommandType.Set ->
                     match request.Value with
                     | Some value ->
-                        let! result = dispatcher.DispatchSet(request.Key, value)
+                        let! queued = dispatcher.DispatchSetDeferred(request.Key, value)
 
-                        match result with
-                        | Ok() ->
-                            Logger.Debug $"SET success: key length={request.Key.Length}, value length={value.Length}"
+                        match queued with
+                        | Ok commitTask ->
+                            let! result = commitTask |> Async.AwaitTask
 
-                            return Protocol.CreateSuccessResponse None
+                            match result with
+                            | Ok() ->
+                                Logger.Debug $"SET success: key length={request.Key.Length}, value length={value.Length}"
+                                return Protocol.CreateSuccessResponse None
+                            | Error msg ->
+                                Logger.Error $"SET failed: {msg}"
+                                return Protocol.CreateErrorResponse msg
                         | Error msg ->
                             Logger.Error $"SET failed: {msg}"
                             return Protocol.CreateErrorResponse msg
@@ -47,12 +53,19 @@ module RequestHandler =
                         return Protocol.CreateErrorResponse msg
 
                 | CommandType.Delete ->
-                    let! result = dispatcher.DispatchDelete request.Key
+                    let! queued = dispatcher.DispatchDeleteDeferred request.Key
 
-                    match result with
-                    | Ok() ->
-                        Logger.Debug $"DELETE success: key length={request.Key.Length}"
-                        return Protocol.CreateSuccessResponse None
+                    match queued with
+                    | Ok commitTask ->
+                        let! result = commitTask |> Async.AwaitTask
+
+                        match result with
+                        | Ok() ->
+                            Logger.Debug $"DELETE success: key length={request.Key.Length}"
+                            return Protocol.CreateSuccessResponse None
+                        | Error msg ->
+                            Logger.Error $"DELETE failed: {msg}"
+                            return Protocol.CreateErrorResponse msg
                     | Error msg ->
                         Logger.Error $"DELETE failed: {msg}"
                         return Protocol.CreateErrorResponse msg

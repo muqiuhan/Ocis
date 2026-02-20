@@ -1,7 +1,6 @@
 module Ocis.WalCommitCoordinator
 
 open System
-open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 
@@ -32,21 +31,23 @@ type WalCommitCoordinator(
             invalidArg "groupCommitBatchSize" "groupCommitBatchSize must be greater than 0"
 
     let gate = obj ()
-    let pending = ResizeArray<TaskCompletionSource<unit>>()
+    let pending = ResizeArray<TaskCompletionSource<Result<unit, string>>>()
     let mutable disposed = false
     let mutable timer: Timer option = None
     let mutable flushScheduled = false
 
-    let completeBatch (batch: TaskCompletionSource<unit> array) =
+    let completeBatch (batch: TaskCompletionSource<Result<unit, string>> array) =
         if batch.Length > 0 then
             try
                 durableFlush ()
 
                 for waiter in batch do
-                    waiter.TrySetResult() |> ignore
+                    waiter.TrySetResult(Ok()) |> ignore
             with ex ->
+                let error = Error ex.Message
+
                 for waiter in batch do
-                    waiter.TrySetException ex |> ignore
+                    waiter.TrySetResult(error) |> ignore
 
     let flushPendingBatch () =
         let batch =
@@ -81,17 +82,19 @@ type WalCommitCoordinator(
                     let callback = TimerCallback(fun _ -> flushPendingBatch ())
                     timer <- Some(new Timer(callback, null, groupCommitWindowMs, Timeout.Infinite)))
 
-    member _.AwaitDurableCommit() : unit =
+    member _.RegisterDurableCommit() : Task<Result<unit, string>> =
         match mode with
-        | Fast -> ()
+        | Fast -> Task.FromResult(Ok())
         | Strict ->
-            lock gate (fun () ->
-                if disposed then
-                    raise (ObjectDisposedException(nameof WalCommitCoordinator)))
-
-            durableFlush ()
+            Task.Run(fun () ->
+                try
+                    durableFlush ()
+                    Ok()
+                with ex ->
+                    Error ex.Message)
         | Balanced ->
-            let waiter = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let waiter =
+                TaskCompletionSource<Result<unit, string>>(TaskCreationOptions.RunContinuationsAsynchronously)
 
             let shouldFlushImmediately =
                 lock gate (fun () ->
@@ -112,11 +115,16 @@ type WalCommitCoordinator(
                         false)
 
             if shouldFlushImmediately then
-                flushPendingBatch ()
+                Task.Run(fun () -> flushPendingBatch ()) |> ignore
             else
                 ensureTimerScheduled ()
 
-            waiter.Task.GetAwaiter().GetResult()
+            waiter.Task
+
+    member this.AwaitDurableCommit() : unit =
+        match this.RegisterDurableCommit().GetAwaiter().GetResult() with
+        | Ok() -> ()
+        | Error msg -> raise (InvalidOperationException(msg))
 
     interface IDisposable with
         member _.Dispose() =

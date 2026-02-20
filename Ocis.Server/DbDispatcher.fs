@@ -95,11 +95,17 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
     member this.DispatchSet(key: byte array, value: byte array) : Async<Result<unit, string>> =
         this.TryDispatch(fun sharedDb -> sharedDb.Set(key, value))
 
+    member this.DispatchSetDeferred(key: byte array, value: byte array) : Async<Result<Task<Result<unit, string>>, string>> =
+        this.TryDispatch(fun sharedDb -> sharedDb.SetDeferred(key, value))
+
     member this.DispatchGet(key: byte array) : Async<Result<byte array option, string>> =
         this.TryDispatch(fun sharedDb -> sharedDb.Get key)
 
     member this.DispatchDelete(key: byte array) : Async<Result<unit, string>> =
         this.TryDispatch(fun sharedDb -> sharedDb.Delete key)
+
+    member this.DispatchDeleteDeferred(key: byte array) : Async<Result<Task<Result<unit, string>>, string>> =
+        this.TryDispatch(fun sharedDb -> sharedDb.DeleteDeferred key)
 
     member _.StopAsync() : Async<unit> =
         async {

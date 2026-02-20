@@ -189,3 +189,22 @@ type DurabilityModeTests() =
         Assert.That(completed, Is.True, "Batch-size trigger should complete before timer window")
         Assert.That(sw.ElapsedMilliseconds, Is.LessThan 1500L)
         Assert.That(flushCount, Is.EqualTo 1)
+
+    [<Test>]
+    member _.BalancedCoordinator_FlushesOnTimerWhenBatchNotReached() =
+        let mutable flushCount = 0
+
+        let durableFlushOverride () =
+            Interlocked.Increment(&flushCount) |> ignore
+
+        use coordinator =
+            new WalCommitCoordinator(DurabilityMode.Balanced, 80, 8, durableFlushOverride)
+
+        let sw = Stopwatch.StartNew()
+        let result = coordinator.RegisterDurableCommit().GetAwaiter().GetResult()
+        sw.Stop()
+
+        Assert.That(result.IsOk, Is.True)
+        Assert.That(sw.ElapsedMilliseconds, Is.GreaterThanOrEqualTo 40L)
+        Assert.That(sw.ElapsedMilliseconds, Is.LessThan 1000L)
+        Assert.That(flushCount, Is.EqualTo 1)

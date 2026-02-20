@@ -8,6 +8,7 @@ open Ocis.WalCommitCoordinator
 open System.IO
 open System
 open System.Text
+open System.Threading.Tasks
 open Ocis.ValueLocation
 open FSharp.Collections
 open Ocis.Utils.Logger
@@ -1313,7 +1314,7 @@ type OcisDB
     /// <param name="key">The key to set.</param>
     /// <param name="value">The value to associate with the key.</param>
     /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
-    member this.Set(key: byte array, value: byte array) : Result<unit, string> =
+    member this.SetDeferred(key: byte array, value: byte array) : Result<Task<Result<unit, string>>, string> =
         this.AssertOwnerThread("Set")
 
         try
@@ -1334,11 +1335,23 @@ type OcisDB
                     // 4. Check MemTable size and trigger flush if needed
                     this.CheckAndFlushMemtable())
 
-                walCommitCoordinator.AwaitDurableCommit()
-
-                Ok()
+                Ok(walCommitCoordinator.RegisterDurableCommit())
         with ex ->
             Error $"Failed to set key-value pair: {ex.Message}"
+
+    /// <summary>
+    /// Sets a key-value pair in the database.
+    /// </summary>
+    /// <param name="key">The key to set.</param>
+    /// <param name="value">The value to associate with the key.</param>
+    /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
+    member this.Set(key: byte array, value: byte array) : Result<unit, string> =
+        match this.SetDeferred(key, value) with
+        | Error msg -> Error msg
+        | Ok commitTask ->
+            match commitTask.GetAwaiter().GetResult() with
+            | Ok() -> Ok()
+            | Error msg -> Error $"Failed to set key-value pair: {msg}"
 
     /// <summary>
     /// Helper function to check MemTable size and trigger flush if needed.
@@ -1424,7 +1437,7 @@ type OcisDB
     /// </summary>
     /// <param name="key">The key to delete.</param>
     /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
-    member this.Delete(key: byte array) : Result<unit, string> =
+    member this.DeleteDeferred(key: byte array) : Result<Task<Result<unit, string>>, string> =
         this.AssertOwnerThread("Delete")
 
         try
@@ -1442,8 +1455,19 @@ type OcisDB
                     // 3. Check MemTable size and trigger flush if needed (same logic as Set)
                     this.CheckAndFlushMemtable())
 
-                walCommitCoordinator.AwaitDurableCommit()
-
-                Ok()
+                Ok(walCommitCoordinator.RegisterDurableCommit())
         with ex ->
             Error $"Failed to delete key {Encoding.UTF8.GetString key}: {ex.Message}"
+
+    /// <summary>
+    /// Deletes a key from the database.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
+    member this.Delete(key: byte array) : Result<unit, string> =
+        match this.DeleteDeferred key with
+        | Error msg -> Error msg
+        | Ok commitTask ->
+            match commitTask.GetAwaiter().GetResult() with
+            | Ok() -> Ok()
+            | Error msg -> Error $"Failed to delete key {Encoding.UTF8.GetString key}: {msg}"
