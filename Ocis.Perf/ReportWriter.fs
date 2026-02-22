@@ -32,6 +32,7 @@ module ReportWriter =
 
         File.WriteAllText(jsonPath, json)
 
+        // Keep CSV schema stable for downstream scripts.
         let csvHeader =
             "target,operation,duration_sec,workers,total_ops,success_ops,failed_ops,error_rate,throughput_ops_sec,p50_ms,p95_ms,p99_ms,mean_ms,min_ms,max_ms"
 

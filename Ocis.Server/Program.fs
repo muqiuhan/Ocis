@@ -1,4 +1,4 @@
-﻿module Ocis.Server.Program
+module Ocis.Server.Program
 
 open FSharp.SystemCommandLine
 open Input
@@ -10,6 +10,8 @@ open Ocis.Server.Config
 open Ocis.Server.Host
 open Ocis.Utils.Logger
 
+// CLI entrypoint that converts command-line options into OcisConfig and then
+// boots the hosted runtime.
 let private runWithHost (config: OcisConfig) =
     let options = OcisServerOptions.FromConfig config
 
@@ -41,6 +43,7 @@ let validateLogLevelOption level =
 
 [<EntryPoint>]
 let main argv =
+    // Optional durability and dispatcher tuning options.
     let durabilityModeInput =
         optionMaybe "--durability-mode"
         |> desc "Durability mode: Strict, Balanced, Fast (default: Balanced)"

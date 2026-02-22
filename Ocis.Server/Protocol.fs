@@ -11,7 +11,8 @@ module Protocol =
     let inline IsValidHeader (magicNumber: uint32) (version: byte) =
         magicNumber = MAGIC_NUMBER && version = PROTOCOL_VERSION
 
-    /// Parse request packet header from byte array
+    /// Parse the fixed-size request header from a byte buffer.
+    /// Parsing failure returns None rather than throwing to caller code.
     let TryParseRequestHeader (buffer: byte array) =
         if buffer.Length < HEADER_SIZE then
             None
@@ -42,7 +43,7 @@ module Protocol =
             with _ ->
                 None
 
-    /// Parse complete request packet from byte array
+    /// Parse one complete request frame (header + payload bytes).
     let TryParseRequestPacket (buffer: byte array) =
         match TryParseRequestHeader buffer with
         | Some header ->
@@ -70,7 +71,7 @@ module Protocol =
                 None
         | None -> None
 
-    /// Serialize response packet to byte array
+    /// Serialize a response frame in protocol wire order.
     let SerializeResponse (packet: ResponsePacket) =
         use ms = new MemoryStream()
         use writer = new BinaryWriter(ms)
@@ -137,6 +138,6 @@ module Protocol =
           Value = None
           ErrorMessage = Some errorMessage }
 
-    /// Validate packet size is reasonable (prevent malicious packets)
+    /// Validate packet size bounds to prevent oversized allocations.
     let IsValidPacketSize (totalLength: int32) =
         totalLength >= HEADER_SIZE && totalLength <= (10 * 1024 * 1024) // Maximum 10MB

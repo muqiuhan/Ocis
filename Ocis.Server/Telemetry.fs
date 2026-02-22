@@ -41,11 +41,15 @@ let private dispatcherQueueDepthGauge =
     )
 
 let RecordRequest (statusCode: StatusCode) (durationMs: double) =
+    // Total requests includes all terminal status codes.
     requestTotalCounter.Add 1L
+    // Duration measures end-to-end request handling time in milliseconds.
     requestDurationHistogram.Record durationMs
 
+    // Failed requests are protocol responses with StatusCode.Error.
     if statusCode = StatusCode.Error then
         requestFailedCounter.Add 1L
 
 let SetDispatcherQueueDepthProvider(provider: unit -> int) =
+    // The gauge callback reads this provider during metric collection.
     Volatile.Write(&dispatcherQueueDepthProvider, provider)

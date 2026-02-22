@@ -45,8 +45,8 @@ type Wal(path: string, fileStream: FileStream) =
             Error $"Failed to open or create WAL file '{path}': {ex.Message}"
 
     /// <summary>
-    /// Appends a WalEntry to the WAL file.
-    /// The format of each WalEntry depends on its type (Set or Delete).
+    /// Appends one WAL entry.
+    /// Callers are responsible for coordinating flush semantics.
     /// </summary>
     /// <param name="entry">The WalEntry to append.</param>
     member _.Append(entry: WalEntry) : unit =
@@ -66,8 +66,7 @@ type Wal(path: string, fileStream: FileStream) =
         )
 
     /// <summary>
-    /// Reads and replays all WalEntries from the WAL file.
-    /// This method is used to reconstruct Memtbl during crash recovery.
+    /// Reads and replays all WAL entries for crash recovery.
     /// </summary>
     /// <param name="path">The path of the WAL file.</param>
     /// <returns>A sequence containing all WalEntries.</returns>
@@ -136,6 +135,7 @@ type Wal(path: string, fileStream: FileStream) =
 
     /// <summary>
     /// Safely truncates the WAL after a durable checkpoint.
+    /// The durable flush before and after truncation prevents torn resets.
     /// </summary>
     member _.Reset() : unit =
         lock fileStream (fun () ->

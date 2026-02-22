@@ -545,9 +545,6 @@ type OcisDB
             Error $"Error recompacting SSTable {sstbl.Path}: {ex.Message}"
 
     /// <summary>
-    /// Performs optimized compaction for Level 0 SSTables with intelligent selection.
-    /// </summary>
-    /// <summary>
     /// Performs optimized compaction for Level 0 SSTables.
     /// </summary>
     member this.CompactLevel0() : unit =
@@ -587,9 +584,6 @@ type OcisDB
                 Logger.Debug "Level 0 compaction: No suitable SSTables found for compaction"
         | _ -> () // No compaction needed for Level 0
 
-    /// <summary>
-    /// Helper to update SSTables map and dispose/delete old SSTable files after compaction.
-    /// </summary>
     /// <summary>
     /// Updates SSTables map and disposes/deletes old SSTable files after compaction.
     /// </summary>
@@ -664,9 +658,6 @@ type OcisDB
             Logger.Debug
                 $"Compaction successful: Removed {sstblsToRemoveFromSource.Length + sstblsToRemoveFromTarget.Length} SSTables (all deletion markers or no new SSTbl)."
 
-    /// <summary>
-    /// Performs optimized compaction for levels greater than 0 using intelligent SSTable selection.
-    /// </summary>
     /// <summary>
     /// Performs optimized compaction for levels greater than 0.
     /// </summary>
@@ -885,7 +876,7 @@ type OcisDB
                 if liveLocations.IsEmpty then
                     Logger.Info "No live locations found, skipping garbage collection"
                 else
-                    // Step 3: Perform garbage collection using synchronous method
+                    // Step 3: Perform garbage collection and get remapped offsets
                     Logger.Info "Using synchronous garbage collection"
 
                     let! gcResult = Valog.CollectGarbage(this.ValueLog, liveLocations)

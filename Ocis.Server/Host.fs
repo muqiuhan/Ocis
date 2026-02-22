@@ -31,6 +31,7 @@ module OcisServerOptions =
     [<Literal>]
     let SectionName = "OcisServer"
 
+    // Map runtime config to host options binding shape.
     let FromConfig (config: OcisConfig) =
         { Dir = config.Dir
           FlushThreshold = config.FlushThreshold
@@ -48,6 +49,7 @@ module OcisServerOptions =
           ReceiveTimeout = config.ReceiveTimeout
           SendTimeout = config.SendTimeout }
 
+    // Convert host-bound options back to runtime config.
     let ToConfig (options: OcisServerOptions) : OcisConfig =
         { Dir = options.Dir
           FlushThreshold = options.FlushThreshold
@@ -107,6 +109,7 @@ type OcisHostedService(options: IOptions<OcisServerOptions>) =
             | Error msg -> Task.FromException(InvalidOperationException(msg))
 
         member _.StopAsync(cancellationToken: CancellationToken) =
+            // Graceful stop is delegated to OcisRuntime.
             match runtime with
             | Some activeRuntime -> activeRuntime.StopAsync(cancellationToken)
             | None -> Task.CompletedTask

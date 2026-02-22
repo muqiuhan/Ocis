@@ -1,14 +1,14 @@
 module Ocis.Server.ProtocolSpec
 
-/// Protocol magic number "OCIS"
+/// Protocol magic number for ASCII bytes "OCIS".
 [<Literal>]
 let MAGIC_NUMBER = 0x5349434Fu
 
-/// Protocol version
+/// Protocol version. This server currently supports only v1.
 [<Literal>]
 let PROTOCOL_VERSION = 1uy
 
-/// Protocol header size (bytes)
+/// Protocol header size in bytes.
 [<Literal>]
 let HEADER_SIZE = 18
 
@@ -35,7 +35,7 @@ type RequestPacket =
       Key: byte array
       Value: byte array option }
 
-/// Response packetnse packet
+/// Response packet
 type ResponsePacket =
     { MagicNumber: uint32
       Version: byte

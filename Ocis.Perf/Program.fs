@@ -5,6 +5,7 @@ open System.Globalization
 open System.IO
 
 let private toMap (args: string array) =
+    // Expect CLI options as '--name value' pairs.
     args
     |> Array.skip 1
     |> Array.chunkBySize 2
@@ -71,6 +72,8 @@ let private buildConfig (args: string array) =
       OutputTag = getOrDefault kv "--tag" "baseline" }
 
 let private validateEngineWorkers (config: BenchmarkConfig) =
+    // Engine target is intentionally single-threaded by default to honor the
+    // storage engine thread-affinity contract.
     if config.Target = Engine && config.Workers > 1 && not config.AllowUnsafeEngineConcurrency then
         failwith
             "Engine benchmark runs in strict single-thread mode and requires workers=1. For diagnostic experiments only, pass --allow-unsafe-engine-concurrency true."
@@ -103,6 +106,8 @@ let main args =
                 Directory.Delete(config.DataDir, true)
 
         if config.WarmupSeconds > 0 then
+            // Warmup runs with the same workload shape but does not count toward
+            // reported runs, which reduces first-run effects.
             let warmupConfig =
                 { config with
                     DurationSeconds = config.WarmupSeconds

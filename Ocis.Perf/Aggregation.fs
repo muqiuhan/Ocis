@@ -3,6 +3,7 @@ namespace Ocis.Perf
 open System
 
 module Aggregation =
+    // Median is robust to outliers across repeated benchmark runs.
     let private median (values: float list) =
         let sorted = values |> List.sort |> List.toArray
 
@@ -16,6 +17,7 @@ module Aggregation =
             else
                 sorted[middle]
 
+    // Coefficient of variation captures run-to-run stability.
     let private coefficientOfVariation (values: float list) =
         match values with
         | []

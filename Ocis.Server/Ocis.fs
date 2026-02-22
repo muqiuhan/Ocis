@@ -24,6 +24,8 @@ module Ocis =
         let mutable serverTask: Task option = None
         let mutable disposed = false
 
+        // Startup is considered complete only when server state reaches Running.
+        // Faulted or canceled startup propagates immediately.
         let rec waitForServerStartup (runningTask: Task) (cancellationToken: CancellationToken) =
             task {
                 cancellationToken.ThrowIfCancellationRequested()
@@ -50,6 +52,8 @@ module Ocis =
             Logger.Info $"Network: {config.Host}:{config.Port}, Max connections: {config.MaxConnections}"
             Logger.Info $"Database: flush threshold={config.FlushThreshold}"
 
+            // Server accept loop runs in background; this call waits for the
+            // runtime to reach a ready state.
             let serverRunTask = server.StartAsync() |> Async.StartAsTask
             serverTask <- Some serverRunTask
 
@@ -65,6 +69,8 @@ module Ocis =
                 let mutable serverStopError: exn option = None
                 let mutable dispatcherStopError: exn option = None
 
+                // Stop order matters: server first (no new requests), then
+                // dispatcher (drain queued DB operations).
                 try
                     do! server.StopAsync() |> Async.StartAsTask
                 with ex ->
@@ -120,6 +126,8 @@ module Ocis =
                     (db :> IDisposable).Dispose()
 
     let TryCreateRuntime (config: OcisConfig) : Result<OcisRuntime, string> =
+        // Runtime construction must either succeed fully or clean up all
+        // partially created resources before returning an error.
         match ConfigHelper.ValidateConfig config with
         | Result.Error msg ->
             Logger.Error $"Configuration validation failed: {msg}"

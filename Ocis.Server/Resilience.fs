@@ -17,6 +17,7 @@ let isTransientAcceptException (ex: exn) =
     | :? SocketException as socketEx -> isTransientSocketError socketEx.SocketErrorCode
     | _ -> false
 
+// Exponential backoff with cap and overflow protection.
 let computeBoundedRetryDelayMs (attempt: int) (baseDelayMs: int) (maxDelayMs: int) =
     let safeAttempt = max 0 attempt
     let effectiveBaseDelay = max 0 baseDelayMs

@@ -9,7 +9,9 @@ open System.Diagnostics
 
 module RequestHandler =
 
-    /// Handle a single request and return a response
+    /// Handle one validated request and return a protocol response.
+    /// For write commands we enqueue work first and await commit completion
+    /// outside the dispatcher thread to avoid head-of-line blocking.
     let HandleRequest (dispatcher: OcisDbDispatcher) (request: RequestPacket) : Async<ResponsePacket> =
         async {
             try
@@ -17,6 +19,8 @@ module RequestHandler =
                 | CommandType.Set ->
                     match request.Value with
                     | Some value ->
+                        // Deferred commit keeps durable waiting off the single
+                        // dispatcher thread so other requests can continue.
                         let! queued = dispatcher.DispatchSetDeferred(request.Key, value)
 
                         match queued with
@@ -53,6 +57,8 @@ module RequestHandler =
                         return Protocol.CreateErrorResponse msg
 
                 | CommandType.Delete ->
+                    // Same deferred pattern as SET for throughput under
+                    // durability modes that require commit waiting.
                     let! queued = dispatcher.DispatchDeleteDeferred request.Key
 
                     match queued with
@@ -81,7 +87,8 @@ module RequestHandler =
                 return Protocol.CreateErrorResponse errorMsg
         }
 
-    /// Validate request packet
+    /// Validate protocol-level boundaries before dispatching to storage.
+    /// These checks protect against malformed frames and oversized payloads.
     let ValidateRequest (request: RequestPacket) : Result<unit, string> =
         // Validate packet size
         if not (Protocol.IsValidPacketSize request.TotalPacketLength) then
@@ -113,7 +120,7 @@ module RequestHandler =
         else
             Ok()
 
-    /// Process validated request
+    /// End-to-end request processing with telemetry emission.
     let ProcessValidRequest (dispatcher: OcisDbDispatcher) (request: RequestPacket) : Async<ResponsePacket> =
         async {
             let startTimestamp = Stopwatch.GetTimestamp()

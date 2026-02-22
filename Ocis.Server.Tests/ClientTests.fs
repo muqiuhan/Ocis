@@ -20,6 +20,7 @@ type ClientTests() =
 
     [<Test>]
     member this.TestBasicOperations() =
+        // This test is intentionally end-to-end against a live server instance.
         if not (TestClientHelper.testConnection host port) then
             Assert.Inconclusive "No server running - skipping client operations test"
         else
@@ -69,4 +70,4 @@ type ClientTests() =
         let convertedBack = TestClientHelper.bytesToString bytes
 
         Assert.That(convertedBack, Is.EqualTo testString)
-        Assert.That(bytes.Length, Is.GreaterThan testString.Length) // UTF-8 编码后应该更长
+        Assert.That(bytes.Length, Is.GreaterThan testString.Length) // UTF-8 encoding uses multi-byte characters

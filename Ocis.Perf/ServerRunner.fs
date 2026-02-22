@@ -37,6 +37,8 @@ module ServerRunner =
         let swGlobal = Stopwatch.StartNew()
         let endAt = swGlobal.Elapsed + TimeSpan.FromSeconds(float config.DurationSeconds)
 
+        // One protocol client per worker avoids shared-socket contention and
+        // better reflects concurrent client behavior.
         let workers =
             [| for workerId in 0 .. config.Workers - 1 do
                    Task.Run(fun () ->
@@ -53,6 +55,7 @@ module ServerRunner =
                                | OperationMode.Set -> client.Set(key, payload)
                                | OperationMode.Get -> client.Get(key)
                                | OperationMode.Mixed ->
+                                   // Mixed mode approximates read-heavy workloads.
                                    if rng.NextDouble() < 0.7 then
                                        client.Get(key)
                                    else

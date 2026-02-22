@@ -7,6 +7,9 @@ open System.Threading.Tasks
 open Ocis.OcisDB
 open Ocis.Server.Telemetry
 
+// Dispatcher invariant: all OcisDB operations run on exactly one dedicated
+// worker thread. This preserves engine thread affinity while callers enqueue
+// work concurrently through a bounded channel.
 type private DbWorkItem = { Execute: OcisDB -> unit }
 
 type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
@@ -36,6 +39,8 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
     let workerCompletion =
         TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
 
+    // A dedicated OS thread is required because async continuations can hop
+    // threads and violate OcisDB affinity checks.
     let workerThread =
         Thread(ThreadStart(fun () ->
             try
@@ -65,6 +70,8 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
         workerThread.Name <- "ocis-db-dispatcher"
         workerThread.Start()
 
+    // FullMode.Wait applies backpressure to producers when the queue is full
+    // rather than dropping work. The returned error indicates shutdown/closure.
     member private _.TryDispatch<'T>(work: OcisDB -> Result<'T, string>) : Async<Result<'T, string>> =
         async {
             if stopped then
@@ -83,7 +90,6 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
                     }
 
                 try
-                    // FullMode.Wait is intended to apply backpressure instead of dropping writes.
                     do! channel.Writer.WriteAsync(item, cancellation.Token).AsTask() |> Async.AwaitTask
                     return! reply.Task |> Async.AwaitTask
                 with
@@ -107,6 +113,7 @@ type OcisDbDispatcher(db: OcisDB, queueCapacity: int) =
     member this.DispatchDeleteDeferred(key: byte array) : Async<Result<Task<Result<unit, string>>, string>> =
         this.TryDispatch(fun sharedDb -> sharedDb.DeleteDeferred key)
 
+    // Stop sequence: complete writer, drain remaining queued work, then return.
     member _.StopAsync() : Async<unit> =
         async {
             lock stopLock (fun () ->

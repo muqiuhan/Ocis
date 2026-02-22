@@ -20,6 +20,7 @@ type OcisConfig =
 
 module ConfigHelper =
 
+    // Baseline defaults for server and storage runtime.
     let CreateDefault (dir: string) =
         { Dir = dir
           FlushThreshold = 1000
@@ -39,6 +40,7 @@ module ConfigHelper =
           SendTimeout = 30000 // 30 seconds
         }
 
+    // Validate user-provided configuration before runtime initialization.
     let ValidateConfig (config: OcisConfig) : Result<unit, string> =
         if config.Port <= 0 || config.Port > 65535 then
             Error "Port must be between 1 and 65535"

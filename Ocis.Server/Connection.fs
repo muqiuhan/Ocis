@@ -25,7 +25,8 @@ type Connection(socket: Socket, dispatcher: OcisDbDispatcher, connectionId: stri
     member _.State = state
     member _.Socket = socket
 
-    /// Main loop of connection handling
+    /// Per-connection request loop. Requests are processed sequentially for
+    /// each socket while many connections run concurrently.
     member this.HandleAsync() =
         async {
             try
@@ -61,7 +62,8 @@ type Connection(socket: Socket, dispatcher: OcisDbDispatcher, connectionId: stri
                 Logger.Error $"Connection {connectionId} error: {ex.Message}"
         }
 
-    /// Read a complete message from the network stream
+    /// Read one framed request: fixed-size header first, then payload bytes.
+    /// Returns None on clean disconnect, framing error, or read failure.
     member private this.ReadMessageAsync(stream: NetworkStream) =
         async {
             try
@@ -110,7 +112,8 @@ type Connection(socket: Socket, dispatcher: OcisDbDispatcher, connectionId: stri
     member private this.ReadExactAsync(stream: NetworkStream, buffer: byte array, count: int) =
         async { return! this.ReadExactAsync(stream, buffer, count, 0) }
 
-    /// Ensure reading specified number of bytes (with offset)
+    /// Ensure a target number of bytes are read unless the peer closes
+    /// the connection or cancellation is requested.
     member private this.ReadExactAsync(stream: NetworkStream, buffer: byte array, count: int, offset: int) =
         async {
             let mutable totalRead = 0
@@ -135,7 +138,7 @@ type Connection(socket: Socket, dispatcher: OcisDbDispatcher, connectionId: stri
             return totalRead
         }
 
-    /// Send response to network stream
+    /// Serialize and send one response frame.
     member private this.SendResponseAsync(stream: NetworkStream, response: ResponsePacket) =
         async {
             try
@@ -152,7 +155,7 @@ type Connection(socket: Socket, dispatcher: OcisDbDispatcher, connectionId: stri
                 state <- ConnectionState.Error ex.Message
         }
 
-    /// Close connection
+    /// Close the connection and transition state to Disconnected when possible.
     member this.CloseAsync() =
         async {
             if not isDisposed then

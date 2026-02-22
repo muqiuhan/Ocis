@@ -11,6 +11,7 @@ type ThreadOwner private (initialOwnerThreadId: int) =
     member _.OwnerThreadId = Volatile.Read(&ownerThreadId)
 
     member _.AssertOwnerThread(operationName: string) : unit =
+        // All engine operations must execute on the captured owner thread.
         let currentThreadId = Environment.CurrentManagedThreadId
 
         if currentThreadId <> Volatile.Read(&ownerThreadId) then
@@ -20,6 +21,8 @@ type ThreadOwner private (initialOwnerThreadId: int) =
             )
 
     member _.RebindOwnerThread(operationName: string) : unit =
+        // Rebind is allowed once so a dispatcher can transfer ownership from
+        // construction thread to its dedicated worker thread.
         lock gate (fun () ->
             if rebound then
                 raise

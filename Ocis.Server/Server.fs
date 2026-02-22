@@ -65,7 +65,8 @@ type TcpServer(config: ServerConfig, dispatcher: OcisDbDispatcher) =
                 return raise ex
         }
 
-    /// Main loop of accepting client connections
+    /// Main accept loop with connection-limit backpressure and bounded retry
+    /// for transient socket failures.
     member private this.AcceptConnectionsAsync(listener: TcpListener) =
         async {
             let mutable transientAcceptFailureCount = 0
@@ -74,13 +75,13 @@ type TcpServer(config: ServerConfig, dispatcher: OcisDbDispatcher) =
                 while not cancellationTokenSource.Token.IsCancellationRequested
                       && state = ServerState.Running do
                     try
-                        // Check connection limit
+                        // Backpressure when connection budget is exhausted.
                         if activeConnections.Count >= config.MaxConnections then
                             Logger.Warn $"Maximum connections ({config.MaxConnections}) reached, waiting..."
 
                             do! Async.Sleep 1000
                         else
-                            // Accept new connection
+                            // Accept and configure one client connection.
                             let! tcpClient = listener.AcceptTcpClientAsync() |> Async.AwaitTask
                             transientAcceptFailureCount <- 0
 
@@ -125,7 +126,7 @@ type TcpServer(config: ServerConfig, dispatcher: OcisDbDispatcher) =
                 return raise ex
         }
 
-    /// Handle single client connection
+    /// Handle a single client lifecycle. Cleanup is guaranteed in finally.
     member private this.HandleConnectionAsync(connection: Connection) =
         async {
             try
@@ -142,7 +143,8 @@ type TcpServer(config: ServerConfig, dispatcher: OcisDbDispatcher) =
                     $"Connection {connection.ConnectionId} removed, remaining connections: {activeConnections.Count}"
         }
 
-    /// Stop server
+    /// Graceful shutdown order:
+    /// 1) stop accepting, 2) close listener, 3) close active connections.
     member this.StopAsync() =
         async {
             match state with
@@ -215,8 +217,8 @@ module ServerManager =
         { Host = host
           Port = port
           MaxConnections = 1000
-          ReceiveTimeout = 30000 // 30秒
-          SendTimeout = 30000 // 30秒
+          ReceiveTimeout = 30000 // 30 seconds
+          SendTimeout = 30000 // 30 seconds
         }
 
     /// Create server instance

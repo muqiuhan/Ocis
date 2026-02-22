@@ -74,6 +74,7 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     let mutable tail: int64 = tail
     let threadOwner = ThreadOwner.CaptureOwnerThread()
 
+    // Valog is thread-affine; caller must execute all reads/writes on owner thread.
     member _.BindToCurrentThread() = threadOwner.RebindOwnerThread("Valog.BindToCurrentThread")
 
     member _.Path = path
@@ -440,10 +441,8 @@ and Valog(path: string, fileStream: FileStream, reader: BinaryReader, writer: Bi
     /// This is crucial for data persistence.
     /// </summary>
     member _.Flush() : unit =
-        // Usually, to ensure data persistence to stable storage, flush needs to be followed by fsync.
-        // However, the WiscKey paper mentions that WAL provides atomicity and consistency, and Value Log writes can be buffered.
-        // Here, a complete fsync may offset the performance advantage of buffering.
-        // For simplicity and
+        // Value log flush does not force fsync by default; durability guarantees
+        // are coordinated through WAL and commit policy.
         fileStream.Flush()
 
     /// <summary>

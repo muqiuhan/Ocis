@@ -98,7 +98,7 @@ type TestClient(host: string, port: int) =
         stream.Write(requestBytes, 0, requestBytes.Length)
         stream.Flush()
 
-        // Read response header
+        // Read fixed-size response header first, then remaining payload.
         let headerBytes = this.ReadExact(stream, 18)
 
         // Parse header to get total length

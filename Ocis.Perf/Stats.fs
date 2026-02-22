@@ -3,6 +3,7 @@ namespace Ocis.Perf
 open System
 
 module Stats =
+    // Percentile uses nearest-rank over sorted samples.
     let private percentile (sorted: float array) (p: float) =
         if sorted.Length = 0 then
             0.0
@@ -47,6 +48,7 @@ module Stats =
             else
                 float failures / float total
 
+        // Throughput is based on successful operations per second.
         let throughput =
             if durationSeconds <= 0.0 then
                 0.0

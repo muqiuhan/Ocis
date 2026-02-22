@@ -58,6 +58,7 @@ type ThreadAffinityTests() =
 
     [<Test>]
     member _.CrossThreadGet_ShouldThrowInvalidOperationException() =
+        // Cross-thread access must fail fast to protect single-thread engine invariants.
         match OcisDB.Open(testDbPath, flushThreshold) with
         | Error msg -> Assert.Fail $"Failed to open DB: {msg}"
         | Ok db ->

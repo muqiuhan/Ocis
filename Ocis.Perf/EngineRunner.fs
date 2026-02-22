@@ -49,6 +49,7 @@ module EngineRunner =
         let swGlobal = Stopwatch.StartNew()
         let endAt = swGlobal.Elapsed + TimeSpan.FromSeconds(float config.DurationSeconds)
 
+        // Each worker loops until duration expires and records per-op latency.
         let runWorker (rng: Random) =
             while swGlobal.Elapsed < endAt do
                 let keyIndex = Interlocked.Increment(indexCounter) % keys.Length
@@ -62,6 +63,7 @@ module EngineRunner =
                     | OperationMode.Get ->
                         db.Get(key).IsOk
                     | OperationMode.Mixed ->
+                        // Mixed mode approximates read-heavy workloads.
                         if rng.NextDouble() < 0.7 then
                             db.Get(key).IsOk
                         else

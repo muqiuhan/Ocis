@@ -1,287 +1,188 @@
-# Ocis 
+# Ocis
 
-[![Build and Test](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml) 
+[中文](./REAMDE_zh.md) | **English**
+
+[![Build and Test](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml)
 [![Qodana](https://github.com/muqiuhan/Ocis/actions/workflows/qodana_code_quality.yml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/qodana_code_quality.yml)
 
-> A cross-platform, robust asynchronous WiscKey storage engine and server.
+Ocis is a key-value storage project implemented in F# with two runnable forms:
 
-Ocis is a key-value storage engine implemented based on the [WiscKey](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf) paper, written in F#. WiscKey's core idea is key-value separation, storing keys in an LSM-Tree based index structure, while storing the actual values in a separate, append-only Value Log. This design aims to optimize SSD performance by enabling sequential writes and reducing write amplification, thereby achieving low latency and high throughput.
+- **Ocis**: An embedded storage engine with WiscKey-style key/value separation
+- **Ocis.Server**: A TCP server that exposes `SET/GET/DELETE` operations via a custom binary protocol
 
-The project includes both an embedded storage engine library (`Ocis`) and a high-performance TCP server (`Ocis.Server`) that provides network access through a custom binary protocol, making it suitable for distributed applications and microservices architectures.
+## Project Overview
 
-### Project Structure
+### What Ocis Is
+- Suitable for single-node deployments requiring a compact embedded engine and lightweight TCP server
+- Includes durability modes (`Strict`, `Balanced`, `Fast`), WAL replay, SSTable compaction, and recovery tests
 
-- **`Ocis/`** - Core WiscKey storage engine library
-  - Memtable, SSTable, ValueLog, and WAL implementations
-  - Compaction and garbage collection algorithms
-  - Embedded database API
-- **`Ocis.Server/`** - High-performance TCP server
-  - Binary network protocol implementation
-  - Connection management and async I/O
-  - Server configuration and lifecycle management
-  - **`Ocis.Protocol/`** - Ocis.Server SDK with multi-language support
-    - Use Fable to provide client support for Ocis.Server in JS/TS/Rust/Python/Dart
-- **`Ocis.Tests/`** - Performance benchmarks and core engine tests
-- **`Ocis.Server.Tests/`** - Server integration and protocol tests
+### What Ocis Is Not
+- Not a distributed/replicated database (no Raft, no multi-node consistency, no built-in failover)
 
-## Design
+## Project Structure
 
-*   **Key-Value Separation**: Unlike traditional LSM-Trees that store keys and values together, Ocis only stores `(key, value location in Value Log)` in the Memtable (in-memory mutable structure) and SSTable (on-disk immutable file), writing the actual values to an append-only **Value Log**. This significantly reduces the size of the LSM-Tree and I/O amplification, making it particularly suitable for SSDs.
-*   **LSM-Tree Structure**: The project implements Memtable (in-memory mutable structure), SSTable (on-disk immutable file), and Write-Ahead Log (WAL). Through a background Compaction process, SSTables are optimized and garbage collected.
-*   **Durability and Recovery**: **WAL (Write-Ahead Log)** ensures the durability of Memtable updates, supports crash recovery, and guarantees data consistency.
-*   **Network Server**: Ocis includes a high-performance TCP server implementation that provides network access to the WiscKey storage engine through a custom binary protocol, supporting multiple client connections and CRUD operations.
+```
+Ocis/
+├── Ocis/                      # Core storage engine
+│   ├── Ocis.fs               # Main engine implementation
+│   └── Ocis.fsproj           # Project file
+├── Ocis.Server/              # TCP server
+│   ├── Program.fs            # CLI entry point
+│   ├── Config.fs             # Configuration validation
+│   ├── Host.fs               # Hosted service
+│   ├── Server.fs             # TCP server
+│   ├── DbDispatcher.fs       # Database dispatcher
+│   └── Ocis.Server.fsproj    # Project file
+├── Ocis.Tests/               # Engine tests
+├── Ocis.Server.Tests/        # Server tests
+├── Ocis.Perf/                # Performance testing tools
+└── Ocis.Perf.Tests/          # Performance test validation
+```
 
-## Performance Benchmarks
+## Architecture and Technology Stack
 
-BenchmarkDotNet v0.15.2, Linux Pop!_OS 22.04 LTS
-AMD Ryzen 7 6800H with Radeon Graphics 4.79GHz, 1 CPU, 16 logical and 8 physical cores
-.NET SDK 10.0.100-rc.2.25502.107
-  [Host]   : .NET 10.0.0 (10.0.25.50307), X64 AOT AVX2 DEBUG
-  ShortRun : .NET 10.0.0 (10.0.25.50307), X64 RyuJIT AVX2
+### Technology Stack
+- **Language/Runtime**: F# on .NET 10
+- **Hosting Framework**: `Microsoft.Extensions.Hosting`
+- **Logging**: `Microsoft.Extensions.Logging`
+- **CLI Framework**: `FSharp.SystemCommandLine`
 
-Job=ShortRun  InvocationCount=1  IterationCount=3  
-LaunchCount=1  UnrollFactor=1  WarmupCount=3  
+### Concurrency Model
+- **Engine**: Strict single-thread affinity with fail-fast thread checks
+- **Server**: Bounded queue + dedicated dispatcher thread with asynchronous request processing
 
- | Method      | Count      |           Mean |          Error |        StdDev |          Gen0 |      Gen1 |       Allocated |
- | ----------- | ---------- | -------------: | -------------: | ------------: | ------------: | --------: | --------------: |
- | **BulkSet** | **1000**   |   **5.016 ms** |   **4.739 ms** | **0.2598 ms** |         **-** |     **-** |   **166.37 KB** |
- | BulkGet     | 1000       |       8.450 ms |      44.833 ms |     2.4574 ms |             - |         - |       447.62 KB |
- | **BulkSet** | **10000**  |  **63.776 ms** |  **14.909 ms** | **0.8172 ms** |         **-** |     **-** |  **1432.08 KB** |
- | BulkGet     | 10000      |      82.843 ms |      18.176 ms |     0.9963 ms |             - |         - |      4244.58 KB |
- | **BulkSet** | **100000** | **245.704 ms** | **118.720 ms** | **6.5074 ms** | **1000.0000** |     **-** | **14088.39 KB** |
- | BulkGet     | 100000     |     286.427 ms |      23.933 ms |     1.3119 ms |     4000.0000 | 2000.0000 |     42213.39 KB |
+### Storage Design
+- **Key Metadata**: Stored in Memtable/SSTable
+- **Value Data**: Stored in append-only ValueLog
+- **Durability**: WAL (Write-Ahead Log) for durability and replay
 
-**Note**: These figures represent memory allocated per *operation* during the benchmark run, not the total private memory size of the process. For persistent storage engines, actual memory consumption may vary depending on data volume and internal caching mechanisms.
+## Request/Data Flow
 
-## Network Server and Protocol
+```mermaid
+flowchart LR
+  C[Client] --> P[Protocol Parse]
+  P --> H[Request Handler]
+  H --> Q[DbDispatcher Queue]
+  Q --> T[Dedicated DB Thread]
+  T --> E[OcisDB]
+  E --> WAL[WAL]
+  E --> VLOG[ValueLog]
+  E --> MEM[Memtable]
+  MEM -->|flush| SST[SSTables]
+  WAL -->|batch/timer durable commit| H
+  H --> R[Protocol Response]
+  R --> C
+```
 
-Ocis provides a high-performance TCP server (`Ocis.Server`) that exposes the WiscKey storage engine over the network using a custom binary protocol. The server supports multiple client connections and provides full CRUD operations.
+## Durability Modes
 
-### Server Features
+- **Strict**: Each write waits for durable WAL flush before success
+- **Balanced**: Group commit (time window + batch size trigger)
+- **Fast**: No per-request durable wait (highest throughput, weakest durability)
 
-- **High Performance**: Built on .NET's high-performance networking stack with optimized async I/O
-- **Multiple Connections**: Supports up to 1000 client connections by default
-- **Binary Protocol**: Efficient custom binary protocol with minimal overhead
-- **Production Ready**: Includes comprehensive error handling, logging, and graceful shutdown
-- **Native AOT Compatible**: Can be compiled to a self-contained native executable
+## Implementation Notes
 
-### Starting the Server
+- Strict single-thread engine is enforced by thread affinity checks in core operations
+- Server dispatcher binds the engine to a dedicated worker thread
+- Balanced durability was optimized to avoid dispatcher head-of-line blocking by deferred commit waiting
+- WAL checkpoint/reset is implemented and covered by tests
+
+## Performance Results
+
+Environment: Local developer machine, single-node, `value=256B`, short repeated runs from `Ocis.Perf` aggregate outputs in `BenchmarkDotNet.Artifacts/results/throughput/`.
+
+### Engine (workers=1)
+
+| Mode     | Workload | Throughput (ops/s) | p99 (ms) |
+| -------- | -------- | -----------------: | -------: |
+| Balanced | set      |             128.22 |     8.12 |
+| Strict   | set      |             324.36 |     6.04 |
+| Fast     | set      |          49,405.64 |   0.0089 |
+| Balanced | get      |         997,083.92 |    0.002 |
+| Balanced | mixed    |             428.73 |     8.09 |
+
+### Server (workers=32, set)
+
+| Mode     |     ops/s | p99 (ms) |
+| -------- | --------: | -------: |
+| Balanced |  3,109.27 |    19.79 |
+| Strict   |    410.06 |    94.04 |
+| Fast     | 35,196.24 |    21.07 |
+
+**Notes:**
+- The large Balanced improvement comes from deferred commit waiting + batch trigger path
+- These are not cross-machine benchmark claims; treat them as current repository baseline snapshots
+
+## Build, Run, Test
+
+### Build
 
 ```bash
-# Basic usage with default settings (port 7379)
-dotnet run --project Ocis.Server ./data
+dotnet build Ocis.sln -c Release
+```
 
-# Custom configuration
-dotnet run --project Ocis.Server ./data \
+### Run Server
+
+`working-dir` is a required positional argument. **Note:** The directory must exist before running.
+
+```bash
+# Create the data directory first
+mkdir -p ./data
+
+# Run the server
+dotnet run --project Ocis.Server/Ocis.Server.fsproj -- ./data \
   --host 0.0.0.0 \
   --port 7379 \
   --max-connections 1000 \
   --flush-threshold 1000 \
+  --durability-mode Balanced \
+  --group-commit-window-ms 5 \
+  --group-commit-batch-size 64 \
+  --db-queue-capacity 8192 \
+  --checkpoint-min-interval-ms 30000 \
   --log-level Info
 ```
 
-### Binary Protocol Specification
-
-The Ocis network protocol is a lightweight binary protocol designed for high performance and minimal overhead.
-
-#### Protocol Header
-
-All packets begin with an 18-byte fixed header:
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        Magic Number (0x5349434F)              |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|    Version    |   Cmd/Status  |         Total Length          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Key Length                            |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                    Value/Error Length                        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                          Payload                             |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-```
-
-#### Field Descriptions
-
-- **Magic Number**: 4 bytes, always `0x5349434F` ("OCIS" in ASCII)
-- **Version**: 1 byte, protocol version (currently `0x01`)
-- **Command/Status**: 1 byte, command type for requests or status code for responses
-- **Total Length**: 4 bytes, total packet length including header
-- **Key Length**: 4 bytes, length of the key in payload
-- **Value/Error Length**: 4 bytes, length of value (responses) or error message
-- **Payload**: Variable length, contains key and value data
-
-#### Command Types
-
-| Command | Value | Description           |
-| ------- | ----- | --------------------- |
-| SET     | 0x01  | Store key-value pair  |
-| GET     | 0x02  | Retrieve value by key |
-| DELETE  | 0x03  | Delete key-value pair |
-
-#### Status Codes
-
-| Status    | Value | Description                      |
-| --------- | ----- | -------------------------------- |
-| SUCCESS   | 0x00  | Operation completed successfully |
-| NOT_FOUND | 0x01  | Key not found (GET operations)   |
-| ERROR     | 0x02  | Operation failed with error      |
-
-#### Request Format
-
-**SET Request:**
-```
-Header (18 bytes) + Key (variable) + Value (variable)
-```
-
-**GET Request:**
-```
-Header (18 bytes) + Key (variable)
-```
-
-**DELETE Request:**
-```
-Header (18 bytes) + Key (variable)
-```
-
-#### Response Format
-
-**Success Response (with value):**
-```
-Header (18 bytes) + Value (variable)
-```
-
-**Success Response (no value):**
-```
-Header (18 bytes)
-```
-
-**Error Response:**
-```
-Header (18 bytes) + Error Message (variable)
-```
-
-### Client Implementation Example
-
-Here's a simple client implementation example:
-
-```fsharp
-// Connect to server
-let client = new TcpClient()
-client.Connect("127.0.0.1", 7379)
-let stream = client.GetStream()
-
-// SET operation
-let key = Encoding.UTF8.GetBytes("my_key")
-let value = Encoding.UTF8.GetBytes("my_value")
-let setRequest = createSetRequest(key, value)
-stream.Write(setRequest, 0, setRequest.Length)
-
-// GET operation  
-let getRequest = createGetRequest(key)
-stream.Write(getRequest, 0, getRequest.Length)
-let response = readResponse(stream)
-```
-
-### Configuration Options
-
-| Option                      | Default | Description                             |
-| --------------------------- | ------- | --------------------------------------- |
-| `--host`                    | 0.0.0.0 | Server bind address                     |
-| `--port`                    | 7379    | Server port                             |
-| `--max-connections`         | 1000    | Maximum number of connections           |
-| `--flush-threshold`         | 1000    | Memtable flush threshold                |
-| `--l0-compaction-threshold` | 4       | L0 SSTable compaction threshold         |
-| `--level-size-multiplier`   | 5       | LSM level size multiplier               |
-| `--log-level`               | Info    | Log level (Debug/Info/Warn/Error/Fatal) |
-
-## Native AOT Compilation
-
-Ocis, through .NET 9.0's Native AOT (Ahead-of-Time) compilation, can be published as a self-contained executable without .NET runtime dependencies. This significantly improves application startup speed and runtime performance, and reduces deployment package size, further advancing the goal of "high-quality, high-performance code."
-
-## Build, Run and Test
-
-### Publishing a Self-Contained AOT Executable
-
-To build and publish the Native AOT version of Ocis, run the following command in the project root directory:
+### Run Tests
 
 ```bash
-dotnet publish Ocis/Ocis.fsproj -c Release -r <RuntimeIdentifier>
+# Engine + server tests
+dotnet test Ocis.Tests/Ocis.Tests.fsproj --filter "TestCategory!=Slow"
+dotnet test Ocis.Server.Tests/Ocis.Server.Tests.fsproj
+
+# Performance harness tests
+dotnet test Ocis.Perf.Tests/Ocis.Perf.Tests.fsproj
 ```
 
-Replace `<RuntimeIdentifier>` with your target platform, for example:
+## Performance Testing and Deployment
 
-* `win-x64` (Windows 64-bit)
-* `linux-x64` (Linux 64-bit)
-* `osx-x64` (macOS 64-bit)
-
-### Run tests
-
-To run the performance and unit tests included with the project, run in the project root:
+### Throughput Benchmark Commands
 
 ```bash
-# Run all tests (core engine and server)
-dotnet test -c Release
+# Engine matrix (strict single-thread baseline)
+bash scripts/run-throughput-engine.sh
 
-# Run server-specific tests (requires no running server)
-dotnet test Ocis.Server.Tests -c Release
-
-# Run performance benchmarks
-dotnet run --project Ocis.Tests -- simple/base/advance
+# Server matrix
+bash scripts/run-throughput-server.sh 127.0.0.1 7379
 ```
 
-#### Server Integration Tests
+See `docs/operations/performance-testing.md` for warmup/repeat/aggregation format and interpretation.
 
-The server tests include:
+### Deployment Guidance
 
-- **Protocol Tests**: Binary protocol serialization/deserialization
-- **Client Tests**: End-to-end client-server communication (requires running server)
-- **Integration Tests**: Configuration validation and server lifecycle
+**Suitable for:**
+- Single-node service deployment with explicit durability mode selection
 
-To run client tests that require a running server:
+**For production exposure:**
+- Put TLS/auth in front (reverse proxy / gateway)
+- Monitor request latency, error rate, dispatcher queue depth, and WAL growth
+- Run crash-recovery and throughput checks before release
 
-```bash
-# Terminal 1: Start the server
-dotnet run --project Ocis.Server ./test_data
+**Related documentation:**
+- `docs/operations/production-runbook.md`
+- `docs/operations/release-checklist.md`
+- `docs/operations/rollback-playbook.md`
 
-# Terminal 2: Run client tests
-dotnet test Ocis.Server.Tests --filter "TestCategory=ClientTests"
-```
+## License
 
-**Note**: Some integration tests require a running Ocis server instance and will be marked as "Inconclusive" if no server is available.
----
-
-## [LICENSE](./LICENSE)
-
-```
-Copyright (c) 2025 Somhairle H. Marisol
-
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without modification,
-are permitted provided that the following conditions are met:
-
-    * Redistributions of source code must retain the above copyright notice,
-      this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright notice,
-      this list of conditions and the following disclaimer in the documentation
-      and/or other materials provided with the distribution.
-    * Neither the name of Ocis nor the names of its contributors
-      may be used to endorse or promote products derived from this software
-      without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
+See [LICENSE](./LICENSE).

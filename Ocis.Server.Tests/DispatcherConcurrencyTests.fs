@@ -36,6 +36,8 @@ type DispatcherConcurrencyTests() =
 
     [<Test>]
     member _.ConcurrentMixedRequestsCompleteWithoutUnhandledExceptions() =
+        // Validates that concurrent clients can enqueue mixed operations while
+        // the dispatcher still serializes DB execution internally.
         let db = openDbOrFail testDbDir
         use db = db
         use dispatcher = new OcisDbDispatcher(db, 4096)
@@ -98,6 +100,7 @@ type DispatcherConcurrencyTests() =
 
     [<Test>]
     member _.DispatchAfterStopReturnsControlledError() =
+        // Ensures shutdown returns a predictable error instead of hanging.
         let db = openDbOrFail testDbDir
         use db = db
         use dispatcher = new OcisDbDispatcher(db, 16)

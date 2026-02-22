@@ -29,7 +29,7 @@ type OcisDBBenchmarks() =
 
         Directory.CreateDirectory tempDir |> ignore
 
-        // 为 Set 测试准备数据
+        // Prepare deterministic key/value inputs for Set benchmarks.
         keys <- Array.init this.Count (fun i -> Encoding.UTF8.GetBytes $"perf_key_{i}")
 
         values <- Array.init this.Count (fun i -> Encoding.UTF8.GetBytes($"perf_value_{i}_" + new string ('A', 100)))

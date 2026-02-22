@@ -23,6 +23,9 @@ type WalCommitCoordinator(
     groupCommitBatchSize: int,
     durableFlush: unit -> unit
 ) =
+    // Strict: flush per write, highest durability and latency.
+    // Balanced: batch flushes by time window or batch size.
+    // Fast: do not wait for durable flush in the write path.
     do
         if mode = Balanced && groupCommitWindowMs <= 0 then
             invalidArg "groupCommitWindowMs" "groupCommitWindowMs must be greater than 0"
@@ -36,6 +39,7 @@ type WalCommitCoordinator(
     let mutable timer: Timer option = None
     let mutable flushScheduled = false
 
+    // Flushes one captured batch and completes all waiters with the same result.
     let completeBatch (batch: TaskCompletionSource<Result<unit, string>> array) =
         if batch.Length > 0 then
             try
@@ -49,6 +53,8 @@ type WalCommitCoordinator(
                 for waiter in batch do
                     waiter.TrySetResult(error) |> ignore
 
+    // Drains current waiters, performs one durable flush, then optionally
+    // schedules another timer if new waiters arrived while flushing.
     let flushPendingBatch () =
         let batch =
             lock gate (fun () ->
@@ -71,6 +77,7 @@ type WalCommitCoordinator(
                 | Some activeTimer -> activeTimer.Change(groupCommitWindowMs, Timeout.Infinite) |> ignore
                 | None -> ())
 
+    // Schedules a single-shot timer for the next balanced flush window.
     let ensureTimerScheduled () =
         lock gate (fun () ->
             if not flushScheduled then
