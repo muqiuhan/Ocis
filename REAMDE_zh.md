@@ -76,9 +76,18 @@ flowchart LR
 
 ## 耐久性模式
 
-- **Strict**：每次写入都等待 WAL 持久化刷写后才返回成功
-- **Balanced**：组提交（时间窗口 + 批量大小触发）
+- **Strict**：每次写入都等待 WAL 持久化刷写后才返回成功（最高耐久性）
+- **Balanced**：组提交（时间窗口 + 批量大小触发）- 适用于多线程服务器
 - **Fast**：不等待每请求的持久化刷写（吞吐量最高，耐久性最弱）
+
+### 各模式适用场景
+
+| 场景 | 推荐模式 | 原因 |
+| ---- | -------- | ---- |
+| 单线程引擎（嵌入式） | **Fast** 或 **Strict** | Balanced 在单线程下无优势 |
+| 多线程服务器 | **Balanced** | 组提交比 Strict 提升 7.6 倍吞吐量 |
+
+**注意**：Balanced 模式的组提交优势仅在并发多线程工作负载下显现。在单线程场景下，时间窗口触发过于频繁，Balanced 实际表现比 Strict 差。
 
 ## 实现要点
 
@@ -95,23 +104,29 @@ flowchart LR
 
 | 模式     | 工作负载 | 吞吐量 (ops/s) | p99 (ms) |
 | -------- | -------- | -------------: | -------: |
-| Balanced | set      |         128.22 |     8.12 |
-| Strict   | set      |         324.36 |     6.04 |
-| Fast     | set      |      49,405.64 |   0.0089 |
-| Balanced | get      |     997,083.92 |    0.002 |
-| Balanced | mixed    |         428.73 |     8.09 |
+| Fast     | set      |      86,813.97 |      0.01 |
+| Strict   | set      |       2,140.32 |      0.64 |
+| Balanced | set      |         624.21 |      1.98 |
+| Balanced | get      |     778,993.12 |     ~0.01 |
+
+**注意**：在单线程引擎中，Balanced 模式（优化后的 1ms 窗口）实际上比 Strict 慢。这是因为组提交仅在并发多线程工作负载下才有帮助。
 
 ### 服务器（workers=32, set）
 
 | 模式     |     ops/s | p99 (ms) |
 | -------- | --------: | -------: |
+| Fast     | 35,196.24 |    21.07 |
 | Balanced |  3,109.27 |    19.79 |
 | Strict   |    410.06 |    94.04 |
-| Fast     | 35,196.24 |    21.07 |
+
+**分析：**
+- Balanced 比 Strict 提供 **7.6 倍** 吞吐量提升（3,109 vs 410 ops/s）
+- Balanced 比 Strict 提供 **4.8 倍** 更低的 p99 延迟（19.79 vs 94.04 ms）
+- 组提交在并发多线程工作负载下表现出色
 
 **说明：**
-- Balanced 模式的大幅提升来自延迟提交等待 + 批量触发路径
 - 这些不是跨机器基准测试声明，请将其视为当前仓库的基线快照
+- 默认组提交参数：`--group-commit-window-ms 1 --group-commit-batch-size 10`
 
 ## 构建、运行、测试
 
@@ -136,8 +151,8 @@ dotnet run --project Ocis.Server/Ocis.Server.fsproj -- ./data \
   --max-connections 1000 \
   --flush-threshold 1000 \
   --durability-mode Balanced \
-  --group-commit-window-ms 5 \
-  --group-commit-batch-size 64 \
+  --group-commit-window-ms 1 \
+  --group-commit-batch-size 10 \
   --db-queue-capacity 8192 \
   --checkpoint-min-interval-ms 30000 \
   --log-level Info

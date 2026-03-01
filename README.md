@@ -76,9 +76,18 @@ flowchart LR
 
 ## Durability Modes
 
-- **Strict**: Each write waits for durable WAL flush before success
-- **Balanced**: Group commit (time window + batch size trigger)
+- **Strict**: Each write waits for durable WAL flush before success (highest durability)
+- **Balanced**: Group commit (time window + batch size trigger) - best for multi-threaded servers
 - **Fast**: No per-request durable wait (highest throughput, weakest durability)
+
+### When to Use Each Mode
+
+| Scenario | Recommended Mode | Reason |
+| -------- | ---------------- | ------ |
+| Single-thread engine (embedded) | **Fast** or **Strict** | Balanced has no advantage in single-thread |
+| Multi-thread server | **Balanced** | Group commit provides 7.6x throughput over Strict |
+
+**Note:** Balanced mode's group commit advantage only appears under concurrent multi-threaded workloads. In single-threaded scenarios, the time window triggers so frequently that Balanced actually performs worse than Strict.
 
 ## Implementation Notes
 
@@ -95,23 +104,29 @@ Environment: Local developer machine, single-node, `value=256B`, short repeated 
 
 | Mode     | Workload | Throughput (ops/s) | p99 (ms) |
 | -------- | -------- | -----------------: | -------: |
-| Balanced | set      |             128.22 |     8.12 |
-| Strict   | set      |             324.36 |     6.04 |
-| Fast     | set      |          49,405.64 |   0.0089 |
-| Balanced | get      |         997,083.92 |    0.002 |
-| Balanced | mixed    |             428.73 |     8.09 |
+| Fast     | set      |         86,813.97 |     0.01 |
+| Strict   | set      |          2,140.32 |     0.64 |
+| Balanced | set      |            624.21 |     1.98 |
+| Balanced | get      |         778,993.12 |    ~0.01 |
+
+**Note:** In single-threaded engine, Balanced mode (with optimized 1ms window) is actually slower than Strict. This is because group commit only helps under concurrent multi-threaded workloads.
 
 ### Server (workers=32, set)
 
 | Mode     |     ops/s | p99 (ms) |
 | -------- | --------: | -------: |
+| Fast     | 35,196.24 |    21.07 |
 | Balanced |  3,109.27 |    19.79 |
 | Strict   |    410.06 |    94.04 |
-| Fast     | 35,196.24 |    21.07 |
+
+**Analysis:**
+- Balanced provides **7.6x throughput** over Strict (3,109 vs 410 ops/s)
+- Balanced provides **4.8x lower p99 latency** than Strict (19.79 vs 94.04 ms)
+- Group commit shines under concurrent multi-threaded workloads
 
 **Notes:**
-- The large Balanced improvement comes from deferred commit waiting + batch trigger path
 - These are not cross-machine benchmark claims; treat them as current repository baseline snapshots
+- Default group commit parameters: `--group-commit-window-ms 1 --group-commit-batch-size 10`
 
 ## Build, Run, Test
 
@@ -136,8 +151,8 @@ dotnet run --project Ocis.Server/Ocis.Server.fsproj -- ./data \
   --max-connections 1000 \
   --flush-threshold 1000 \
   --durability-mode Balanced \
-  --group-commit-window-ms 5 \
-  --group-commit-batch-size 64 \
+  --group-commit-window-ms 1 \
+  --group-commit-batch-size 10 \
   --db-queue-capacity 8192 \
   --checkpoint-min-interval-ms 30000 \
   --log-level Info

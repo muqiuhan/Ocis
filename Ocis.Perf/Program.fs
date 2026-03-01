@@ -67,7 +67,12 @@ let private buildConfig (args: string array) =
       Port = parseInt (getOrDefault kv "--port" "7379")
       FlushThreshold = parseInt (getOrDefault kv "--flush-threshold" "1000")
       DurabilityMode = getOrDefault kv "--durability-mode" "Balanced"
-      GroupCommitWindowMs = parseInt (getOrDefault kv "--group-commit-window-ms" "5")
+      GroupCommitWindowMs = parseInt (getOrDefault kv "--group-commit-window-ms" "1")
+      GroupCommitBatchSize = parseInt (getOrDefault kv "--group-commit-batch-size" "10")
+      ClearCacheBeforeRun = parseBool "--clear-cache" (getOrDefault kv "--clear-cache" "false")
+      ColdStart = parseBool "--cold-start" (getOrDefault kv "--cold-start" "false")
+      PreloadKeyCount = parseInt (getOrDefault kv "--preload-key-count" "0")
+      SkipPreload = parseBool "--skip-preload" (getOrDefault kv "--skip-preload" "false")
       OutputDir = getOrDefault kv "--output-dir" outputDirDefault
       OutputTag = getOrDefault kv "--tag" "baseline" }
 
@@ -83,6 +88,15 @@ let private validateEngineWorkers (config: BenchmarkConfig) =
 
     if config.RepeatCount < 1 then
         failwith "--repeat must be >= 1"
+
+    if config.GroupCommitWindowMs <= 0 then
+        failwith "--group-commit-window-ms must be > 0"
+
+    if config.GroupCommitBatchSize <= 0 then
+        failwith "--group-commit-batch-size must be > 0"
+
+    if config.PreloadKeyCount < 0 then
+        failwith "--preload-key-count must be >= 0"
 
     config
 

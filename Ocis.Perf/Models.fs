@@ -25,6 +25,11 @@ type BenchmarkConfig =
       FlushThreshold: int
       DurabilityMode: string
       GroupCommitWindowMs: int
+      GroupCommitBatchSize: int
+      ClearCacheBeforeRun: bool
+      ColdStart: bool
+      PreloadKeyCount: int
+      SkipPreload: bool
       OutputDir: string
       OutputTag: string }
 

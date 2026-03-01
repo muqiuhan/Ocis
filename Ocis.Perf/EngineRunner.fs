@@ -18,13 +18,42 @@ module EngineRunner =
     let private makeKeys count =
         Array.init count (fun i -> Encoding.UTF8.GetBytes($"perf-key-{i:D8}"))
 
-    let private preloadForReads (db: OcisDB) (keys: byte array array) (value: byte array) =
-        for key in keys do
-            db.Set(key, value) |> ignore
+    let private preloadForReads (db: OcisDB) (keys: byte array array) (value: byte array) (config: BenchmarkConfig) =
+        if config.SkipPreload then
+            printfn "Skipping preload as requested"
+        else
+            let count =
+                if config.PreloadKeyCount > 0 then
+                    min config.PreloadKeyCount keys.Length
+                else
+                    keys.Length
+            
+            printfn "Preloading %d keys..." count
+            for i in 0 .. count - 1 do
+                db.Set(keys[i], value) |> ignore
+
+    let private clearCache () =
+        if System.Environment.OSVersion.Platform = System.PlatformID.Unix then
+            try
+                System.IO.File.WriteAllText("/proc/sys/vm/drop_caches", "3")
+                printfn "OS page cache cleared"
+            with ex ->
+                printfn "Warning: failed to clear cache (may need sudo): %s" ex.Message
+        else
+            printfn "Warning: cache clear only supported on Linux"
 
     let run (config: BenchmarkConfig) : RunSummary =
         let keys = makeKeys config.KeyCount
         let payload = createPayload config.ValueBytes
+
+        if config.ColdStart && System.IO.Directory.Exists(config.DataDir) then
+            printfn "ColdStart: removing existing data directory..."
+            System.IO.Directory.Delete(config.DataDir, true)
+
+        if config.ClearCacheBeforeRun then
+            clearCache ()
+
+        System.IO.Directory.CreateDirectory(config.DataDir) |> ignore
 
         use db =
             match
@@ -32,14 +61,15 @@ module EngineRunner =
                     config.DataDir,
                     config.FlushThreshold,
                     durabilityMode = config.DurabilityMode,
-                    groupCommitWindowMs = config.GroupCommitWindowMs
+                    groupCommitWindowMs = config.GroupCommitWindowMs,
+                    groupCommitBatchSize = config.GroupCommitBatchSize
                 )
             with
             | Ok opened -> opened
             | Error msg -> failwith $"Failed to open OcisDB: {msg}"
 
         if config.Operation = OperationMode.Get || config.Operation = OperationMode.Mixed then
-            preloadForReads db keys payload
+            preloadForReads db keys payload config
 
         let mutable successCount = 0L
         let mutable failureCount = 0L

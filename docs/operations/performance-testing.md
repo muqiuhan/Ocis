@@ -104,3 +104,45 @@ Aggregate summary JSON contains:
 - `Strict` indicates durability cost envelope.
 - `Fast` indicates best-case upper bound without per-op durability wait.
 - For server, use highest worker count that does not cause sustained error growth.
+
+## Advanced Options
+
+### Group Commit Parameters
+
+For `Balanced` durability mode, the following parameters control group commit behavior:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--group-commit-window-ms` | `1` | Time window (in ms) to collect writes before flushing |
+| `--group-commit-batch-size` | `10` | Number of writes to accumulate before triggering flush |
+
+**Tuning guidance:**
+- Smaller window/batch = lower latency, lower throughput
+- Larger window/batch = higher latency, higher throughput
+- For single-threaded engine: `1ms/10` is optimal
+- For multi-threaded server: `5ms/64` may be better
+
+### Cache and Cold Start Control
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--clear-cache` | `false` | Clear OS page cache before run (Linux only, requires sudo) |
+| `--cold-start` | `false` | Delete data directory before each run |
+| `--skip-preload` | `false` | Skip preloading keys for GET tests |
+| `--preload-key-count` | `0` | Number of keys to preload (0 = all) |
+
+**Testing real disk I/O:**
+
+```bash
+# Test with fresh data directory (no warm cache)
+dotnet run --project Ocis.Perf/Ocis.Perf.fsproj -- \
+  engine --ops set --durability-mode Strict --cold-start true \
+  --duration-sec 30 --key-count 100000 --tag cold-strict
+
+# Test without preloading (simulates cache miss)
+dotnet run --project Ocis.Perf/Ocis.Perf.fsproj -- \
+  engine --ops get --skip-preload --cold-start true \
+  --duration-sec 30 --key-count 100000 --tag cold-get
+```
+
+**Note:** `--clear-cache` requires root/sudo access on Linux to write to `/proc/sys/vm/drop_caches`.
