@@ -23,6 +23,21 @@ jobs:
           platform: x64
       - name: Install dependencies
         run: dotnet restore
+      - name: Install dotnet tools
+        run: dotnet tool restore
+      - name: Install fsharplint
+        run: dotnet tool install --tool-path ~/.local/bin dotnet-fsharplint
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      - name: Lint F# code
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          dotnet fsharplint lint Ocis/Ocis.fsproj
+          dotnet fsharplint lint Ocis.Tests/Ocis.Tests.fsproj
+          dotnet fsharplint lint Ocis.Server/Ocis.Server.fsproj
+          dotnet fsharplint lint Ocis.Server.Tests/Ocis.Server.Tests.fsproj
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
       - name: Build
         run: dotnet build --configuration Release --no-restore
       - name: Fast test suite (excludes Slow)

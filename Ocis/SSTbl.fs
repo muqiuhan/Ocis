@@ -12,398 +12,460 @@ open Ocis.Utils.Logger
 
 /// Test-only hooks to inject failures.
 module TestHooks =
-    /// Optional hook that will be invoked right after the SSTable writer is created.
-    /// Intended for unit tests to simulate I/O failures and verify cleanup logic.
-    let mutable FlushFailureHook: (unit -> unit) option = None
+  /// Optional hook that will be invoked right after the SSTable writer is created.
+  /// Intended for unit tests to simulate I/O failures and verify cleanup logic.
+  let mutable FlushFailureHook: (unit -> unit) option = None
 
 /// FileStream needs to be closed and released correctly after use (using the use keyword).
 /// RecordOffsets is a sparse index in memory, pointing to the starting position of each key-value pair in the SSTable file.
 /// LowKey and HighKey are used to quickly determine if a key may exist in this SSTable, reducing unnecessary disk lookups.
 type SSTbl
-    (
-        path: string,
-        timestamp: int64,
-        level: int,
-        fileStream: FileStream,
-        reader: BinaryReader,
-        recordOffsets: int64 array,
-        lowKey: byte array,
-        highKey: byte array
-    ) =
+  (
+    path: string,
+    timestamp: int64,
+    level: int,
+    fileStream: FileStream,
+    reader: BinaryReader,
+    recordOffsets: int64 array,
+    lowKey: byte array,
+    highKey: byte array
+  )
+  =
 
-    member _.Path = path
-    member _.Timestamp = timestamp
-    member _.Level = level
-    member _.FileStream = fileStream
-    member _.Reader = reader
-    member _.RecordOffsets = recordOffsets
-    member _.LowKey = lowKey
-    member _.HighKey = highKey
-    member _.Size = fileStream.Length
+  member _.Path = path
+  member _.Timestamp = timestamp
+  member _.Level = level
+  member _.FileStream = fileStream
+  member _.Reader = reader
+  member _.RecordOffsets = recordOffsets
+  member _.LowKey = lowKey
+  member _.HighKey = highKey
+  member _.Size = fileStream.Length
 
-    /// <summary>
-    /// Checks if the key range of this SSTable overlaps with another SSTable.
-    /// </summary>
-    /// <param name="other">The other SSTable to compare with.</param>
-    /// <returns>True if the key ranges overlap, false otherwise.</returns>
-    member this.Overlaps(other: SSTbl) : bool =
-        let comparer = ByteArrayComparer.ComparerInstance
-        // Check for overlap: (this.LowKey <= other.HighKey AND this.HighKey >= other.LowKey)
-        // OR (other.LowKey <= this.HighKey AND other.HighKey >= this.LowKey)
-        let noOverlap =
-            (comparer.Compare(this.HighKey, other.LowKey) < 0)
-            || (comparer.Compare(other.HighKey, this.LowKey) < 0)
+  /// <summary>
+  /// Checks if the key range of this SSTable overlaps with another SSTable.
+  /// </summary>
+  /// <param name="other">The other SSTable to compare with.</param>
+  /// <returns>True if the key ranges overlap, false otherwise.</returns>
+  member this.Overlaps(other: SSTbl) : bool =
+    let comparer = ByteArrayComparer.ComparerInstance
+    // Check for overlap: (this.LowKey <= other.HighKey AND this.HighKey >= other.LowKey)
+    // OR (other.LowKey <= this.HighKey AND other.HighKey >= this.LowKey)
+    let noOverlap =
+      (comparer.Compare(this.HighKey, other.LowKey) < 0)
+      || (comparer.Compare(other.HighKey, this.LowKey) < 0)
 
-        not noOverlap
+    not noOverlap
 
-    // Implement IDisposable interface, ensure that the FileStream is closed when the SSTbl object is no longer used.
-    interface System.IDisposable with
-        member this.Dispose() =
-            this.Reader.Dispose()
-            this.FileStream.Dispose()
+  // Implement IDisposable interface, ensure that the FileStream is closed when the SSTbl object is no longer used.
+  interface System.IDisposable with
+    member this.Dispose() =
+      this.Reader.Dispose()
+      this.FileStream.Dispose()
 
-    // Implement IEnumerable<KeyValuePair<byte array, ValueLocation>>
-    interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
-        member this.GetEnumerator() =
-            // Helper function to read a key-value pair from the stream at a given offset
-            let readKeyValuePair
-                (stream: FileStream, reader: BinaryReader, offset: int64)
-                : KeyValuePair<byte array, ValueLocation> =
-                lock stream (fun () ->
-                    stream.Seek(offset, SeekOrigin.Begin) |> ignore
-                    // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
+  // Implement IEnumerable<KeyValuePair<byte array, ValueLocation>>
+  interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
+    member this.GetEnumerator() =
+      // Helper function to read a key-value pair from the stream at a given offset
+      let readKeyValuePair
+        (stream: FileStream, reader: BinaryReader, offset: int64)
+        : KeyValuePair<byte array, ValueLocation>
+        =
+        lock stream (fun () ->
+          stream.Seek(offset, SeekOrigin.Begin) |> ignore
+          // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
 
-                    let key = Serialization.readByteArray reader
-                    let valueLocation = Serialization.readValueLocation reader
-                    KeyValuePair<byte array, ValueLocation>(key, valueLocation))
+          let key = Serialization.readByteArray reader
+          let valueLocation = Serialization.readValueLocation reader
+          KeyValuePair<byte array, ValueLocation>(key, valueLocation))
 
-            // Create an enumerator that reads key-value pairs from the SSTable file
-            (seq {
-                for offset in this.RecordOffsets do
-                    yield readKeyValuePair (this.FileStream, this.Reader, offset)
-            })
-                .GetEnumerator()
+      // Create an enumerator that reads key-value pairs from the SSTable file
+      (seq {
+        for offset in this.RecordOffsets do
+          yield readKeyValuePair(this.FileStream, this.Reader, offset)
+      })
+        .GetEnumerator()
 
-    // Implement Collections.IEnumerable (non-generic version)
-    interface IEnumerable with
-        member this.GetEnumerator() =
-            (this :> IEnumerable<KeyValuePair<byte array, ValueLocation>>).GetEnumerator() :> IEnumerator
+  // Implement Collections.IEnumerable (non-generic version)
+  interface IEnumerable with
+    member this.GetEnumerator() =
+      (this :> IEnumerable<KeyValuePair<byte array, ValueLocation>>)
+        .GetEnumerator()
+      :> IEnumerator
 
-    /// <summary>
-    /// Flush the data from Memtbl to a new SSTable file.
-    /// </summary>
-    /// <param name="memtbl">The Memtbl instance to flush.</param>
-    /// <param name="path">The path of the new SSTable file.</param>
-    /// <param name="timestamp">The creation timestamp of the SSTable.</param>
-    /// <param name="level">The compression level of the SSTable.</param>
-    /// <returns>A Result: Ok path if successful, otherwise an Error OcisError.</returns>
-    static member Flush(memtbl: Memtbl | null, path: string, timestamp: int64, level: int) : Result<string, OcisError> =
-        // Ensure half-written SSTable files are removed on any failure to preserve atomicity
-        let deleteIfExists () =
-            try
-                if File.Exists path then
-                    File.Delete path
-            with _ ->
-                ()
+  /// <summary>
+  /// Flush the data from Memtbl to a new SSTable file.
+  /// </summary>
+  /// <param name="memtbl">The Memtbl instance to flush.</param>
+  /// <param name="path">The path of the new SSTable file.</param>
+  /// <param name="timestamp">The creation timestamp of the SSTable.</param>
+  /// <param name="level">The compression level of the SSTable.</param>
+  /// <returns>A Result: Ok path if successful, otherwise an Error OcisError.</returns>
+  static member Flush
+    (memtbl: Memtbl | null, path: string, timestamp: int64, level: int)
+    : Result<string, OcisError>
+    =
+    // Ensure half-written SSTable files are removed on any failure to preserve atomicity
+    let deleteIfExists() =
+      try
+        if File.Exists path then
+          File.Delete path
+      with _ ->
+        ()
 
-        try
-            if obj.ReferenceEquals(memtbl, null) then
-                Error NullMemtbl
-            elif System.String.IsNullOrWhiteSpace path then
-                Error(InvalidSSTablePath path)
-            elif level < 0 then
-                Error(InvalidSSTableLevel level)
+    try
+      if obj.ReferenceEquals(memtbl, null) then
+        Error NullMemtbl
+      elif System.String.IsNullOrWhiteSpace path then
+        Error(InvalidSSTablePath path)
+      elif level < 0 then
+        Error(InvalidSSTableLevel level)
+      else
+
+        Logger.Debug
+          $"Flushing Memtbl with {memtbl.Count} entries to SSTable: {path}"
+
+        use fileStream =
+          new FileStream(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None
+          )
+
+        use writer = new BinaryWriter(fileStream)
+
+        // Allow tests to inject failures after file creation to verify cleanup.
+        match TestHooks.FlushFailureHook with
+        | Some hook -> hook()
+        | None -> ()
+
+        // Pre-allocate capacity based on memtbl size to reduce allocations
+        let memtblCount = memtbl.Count
+
+        if memtblCount = 0 then
+          Logger.Warn "Flushing empty Memtbl to SSTable"
+
+        let recordOffsets = Array.zeroCreate<int64> memtblCount
+        let mutable recordIndex = 0
+        let mutable currentLowKey: byte array = null
+        let mutable currentHighKey: byte array = null
+
+        // 1. Write data block (Data Block)
+        let mutable writeError: OcisError option = None
+
+        memtbl
+        |> Seq.iter(fun (KeyValue(key, valueLocation)) ->
+          if writeError.IsNone then
+            if currentLowKey = null then // Record the first key as LowKey
+              currentLowKey <- key
+
+            currentHighKey <- key // Update HighKey to the current key on each iteration
+
+            if recordIndex >= memtblCount then
+              writeError <-
+                Some(SSTableRecordIndexOutOfRange(recordIndex, memtblCount))
             else
+              recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
+              recordIndex <- recordIndex + 1
+              Serialization.writeByteArray writer key
+              Serialization.writeValueLocation writer valueLocation)
 
-                Logger.Debug $"Flushing Memtbl with {memtbl.Count} entries to SSTable: {path}"
+        match writeError with
+        | Some error -> Error error
+        | None ->
+          // Handle empty Memtbl cases, ensure LowKey and HighKey are not null
+          let actualLowKey =
+            currentLowKey
+            |> Option.ofObj
+            |> Option.defaultValue [||]
 
-                use fileStream =
-                    new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)
+          let actualHighKey =
+            currentHighKey
+            |> Option.ofObj
+            |> Option.defaultValue [||]
 
-                use writer = new BinaryWriter(fileStream)
+          // Validate that we wrote the expected number of records
+          if recordIndex <> memtblCount then
+            Error(SSTableRecordCountMismatch(memtblCount, recordIndex))
+          else
+            // 2. Write index block (Index Block)
+            // The starting offset of the index block
+            let indexBlockStartOffset = fileStream.Position
 
-                // Allow tests to inject failures after file creation to verify cleanup.
-                match TestHooks.FlushFailureHook with
-                | Some hook -> hook ()
-                | None -> ()
+            for offset in recordOffsets do
+              writer.Write offset // Write the offset of each key-value pair
 
-                // Pre-allocate capacity based on memtbl size to reduce allocations
-                let memtblCount = memtbl.Count
+            // 3. Write footer/metadata block (Footer/Metadata Block)
+            // The starting offset of the footer
+            let footerStartOffset = fileStream.Position
+            writer.Write timestamp
+            writer.Write level
+            Serialization.writeByteArray writer actualLowKey
+            Serialization.writeByteArray writer actualHighKey
+            writer.Write indexBlockStartOffset // Write the starting offset of the index block
+            writer.Write recordIndex // Write the number of entries in the index block
+            let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
+            writer.Write(footerSize |> int32) // Write the total size of the footer (int32)
 
-                if memtblCount = 0 then
-                    Logger.Warn "Flushing empty Memtbl to SSTable"
+            // Force flush to ensure data is written to disk
+            writer.Flush()
+            fileStream.Flush(true) // Force flush to disk
 
-                let recordOffsets = Array.zeroCreate<int64> memtblCount
-                let mutable recordIndex = 0
-                let mutable currentLowKey: byte array = null
-                let mutable currentHighKey: byte array = null
+            Logger.Debug
+              $"Successfully flushed SSTable: {path} (records: {recordIndex}, size: {fileStream.Length} bytes)"
 
-                // 1. Write data block (Data Block)
-                let mutable writeError: OcisError option = None
+            Ok path // Return the path of the generated SSTable file
 
-                memtbl
-                |> Seq.iter (fun (KeyValue(key, valueLocation)) ->
-                    if writeError.IsNone then
-                        if currentLowKey = null then // Record the first key as LowKey
-                            currentLowKey <- key
+    with
+    | :? System.IO.IOException as ioEx ->
+      deleteIfExists()
+      Logger.Error $"I/O error during SSTable flush to '{path}': {ioEx.Message}"
+      Error(IOError("SSTable flush", path, ioEx.Message))
+    | :? System.UnauthorizedAccessException ->
+      deleteIfExists()
+      Logger.Error $"Access denied during SSTable flush to '{path}'"
+      Error(UnauthorizedAccess path)
+    | ex when ex.Message.Contains "Record index" ->
+      deleteIfExists()
 
-                        currentHighKey <- key // Update HighKey to the current key on each iteration
+      let parts =
+        ex.Message.Split(
+          [|"exceeded expected count"|],
+          System.StringSplitOptions.None
+        )
 
-                        if recordIndex >= memtblCount then
-                            writeError <- Some(SSTableRecordIndexOutOfRange(recordIndex, memtblCount))
-                        else
-                            recordOffsets[recordIndex] <- fileStream.Position // Record the starting offset of the current key-value pair in the file
-                            recordIndex <- recordIndex + 1
-                            Serialization.writeByteArray writer key
-                            Serialization.writeValueLocation writer valueLocation)
+      if parts.Length >= 2 then
+        let indexStr = parts[0].Replace("Record index", "").Trim()
+        let countStr = parts[1].Trim()
 
-                match writeError with
-                | Some error -> Error error
-                | None ->
-                    // Handle empty Memtbl cases, ensure LowKey and HighKey are not null
-                    let actualLowKey = currentLowKey |> Option.ofObj |> Option.defaultValue [||]
-
-                    let actualHighKey = currentHighKey |> Option.ofObj |> Option.defaultValue [||]
-
-                    // Validate that we wrote the expected number of records
-                    if recordIndex <> memtblCount then
-                        Error(SSTableRecordCountMismatch(memtblCount, recordIndex))
-                    else
-                        // 2. Write index block (Index Block)
-                        // The starting offset of the index block
-                        let indexBlockStartOffset = fileStream.Position
-
-                        for offset in recordOffsets do
-                            writer.Write offset // Write the offset of each key-value pair
-
-                        // 3. Write footer/metadata block (Footer/Metadata Block)
-                        // The starting offset of the footer
-                        let footerStartOffset = fileStream.Position
-                        writer.Write timestamp
-                        writer.Write level
-                        Serialization.writeByteArray writer actualLowKey
-                        Serialization.writeByteArray writer actualHighKey
-                        writer.Write indexBlockStartOffset // Write the starting offset of the index block
-                        writer.Write recordIndex // Write the number of entries in the index block
-                        let footerSize = fileStream.Position - footerStartOffset // Calculate the total size of the footer
-                        writer.Write(footerSize |> int32) // Write the total size of the footer (int32)
-
-                        // Force flush to ensure data is written to disk
-                        writer.Flush()
-                        fileStream.Flush(true) // Force flush to disk
-
-                        Logger.Debug
-                            $"Successfully flushed SSTable: {path} (records: {recordIndex}, size: {fileStream.Length} bytes)"
-
-                        Ok path // Return the path of the generated SSTable file
-
+        match
+          System.Int32.TryParse indexStr, System.Int32.TryParse countStr
         with
-        | :? System.IO.IOException as ioEx ->
-            deleteIfExists ()
-            Logger.Error $"I/O error during SSTable flush to '{path}': {ioEx.Message}"
-            Error(IOError("SSTable flush", path, ioEx.Message))
-        | :? System.UnauthorizedAccessException ->
-            deleteIfExists ()
-            Logger.Error $"Access denied during SSTable flush to '{path}'"
-            Error(UnauthorizedAccess path)
-        | ex when ex.Message.Contains "Record index" ->
-            deleteIfExists ()
+        | (true, index), (true, count) ->
+          Error(SSTableRecordIndexOutOfRange(index, count))
+        | _ -> Error(SSTableFlushError(path, ex.Message))
+      else
+        Error(SSTableFlushError(path, ex.Message))
+    | ex ->
+      deleteIfExists()
+      Logger.Error $"Exception type: {ex.GetType().FullName}"
+      Logger.Error
+        $"Unexpected error during SSTable flush to '{path}': {ex.Message}"
+      Error(SSTableFlushError(path, ex.Message))
 
-            let parts =
-                ex.Message.Split([| "exceeded expected count" |], System.StringSplitOptions.None)
+  /// <summary>
+  /// Open an existing SSTable file and load its metadata and in-memory index.
+  /// </summary>
+  /// <param name="path">The path of the SSTable file.</param>
+  /// <returns>An Option type: Some SSTbl if successful, otherwise None.</returns>
+  static member Open(path: string) : SSTbl option =
+    let mutable fileStream: FileStream = null
+    let mutable reader: BinaryReader = null
 
-            if parts.Length >= 2 then
-                let indexStr = parts[0].Replace("Record index", "").Trim()
-                let countStr = parts[1].Trim()
+    let cleanup() =
+      if reader <> null then
+        reader.Dispose()
+      if fileStream <> null then
+        fileStream.Dispose()
 
-                match System.Int32.TryParse indexStr, System.Int32.TryParse countStr with
-                | (true, index), (true, count) -> Error(SSTableRecordIndexOutOfRange(index, count))
-                | _ -> Error(SSTableFlushError(path, ex.Message))
-            else
-                Error(SSTableFlushError(path, ex.Message))
-        | ex ->
-            deleteIfExists ()
-            Logger.Error $"Exception type: {ex.GetType().FullName}"
-            Logger.Error $"Unexpected error during SSTable flush to '{path}': {ex.Message}"
-            Error(SSTableFlushError(path, ex.Message))
+    let validatePath path =
+      if System.String.IsNullOrWhiteSpace path then
+        Logger.Error "SSTable path is null or empty"
+        false
+      elif not(System.IO.File.Exists path) then
+        Logger.Debug $"SSTable file does not exist: {path}"
+        false
+      elif (new System.IO.FileInfo(path)).Length = 0L then
+        Logger.Error $"SSTable file is empty: {path}"
+        false
+      else
+        true
 
-    /// <summary>
-    /// Open an existing SSTable file and load its metadata and in-memory index.
-    /// </summary>
-    /// <param name="path">The path of the SSTable file.</param>
-    /// <returns>An Option type: Some SSTbl if successful, otherwise None.</returns>
-    static member Open(path: string) : SSTbl option =
-        let mutable fileStream: FileStream = null // Declare a mutable variable to close the stream in case of an exception
-        let mutable reader: BinaryReader = null
+    let openFile() =
+      fileStream <-
+        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+      reader <- new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
 
-        let rec tryOpen attempts =
-            try
-                // Validate path before attempting to open
-                if System.String.IsNullOrWhiteSpace path then
-                    Logger.Error "SSTable path is null or empty"
-                    None
-                elif not (System.IO.File.Exists path) then
-                    Logger.Debug $"SSTable file does not exist: {path}"
-                    None
-                elif (new System.IO.FileInfo(path)).Length = 0L then
-                    Logger.Error $"SSTable file is empty: {path}"
-                    None
-                else
-                    fileStream <- new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
-                    // BinaryReader uses the leaveOpen: true parameter to ensure that the FileStream is not closed when the BinaryReader is disposed
-                    reader <- new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
+    let readFooter() =
+      fileStream.Seek(-4L, SeekOrigin.End) |> ignore
+      let footerSize = reader.ReadInt32()
 
-                    // Continue with the rest of the opening logic...
-                    // 1. Read footer (Footer)
-                    // First, move the file pointer back 4 bytes to read the footerSize (int32) at the end of the file
-                    fileStream.Seek(-4L, SeekOrigin.End) |> ignore
-                    let footerSize = reader.ReadInt32() // Read the size of the footer content (excluding footerSize itself)
+      if
+        footerSize <= 0
+        || footerSize > int fileStream.Length
+      then
+        Logger.Error $"Invalid footer size {footerSize} in SSTable '{path}'"
+        None
+      else
+        fileStream.Seek(-(int64 footerSize + 4L), SeekOrigin.End)
+        |> ignore
 
-                    // Validate footer size
-                    if footerSize <= 0 || footerSize > int fileStream.Length then
-                        Logger.Error $"Invalid footer size {footerSize} in SSTable '{path}'"
+        let timestamp = reader.ReadInt64()
+        let level = reader.ReadInt32()
+        let lowKey = Serialization.readByteArray reader
+        let highKey = Serialization.readByteArray reader
+        let indexBlockStartOffset = reader.ReadInt64()
+        let indexEntriesCount = reader.ReadInt32()
+        reader.ReadInt32() |> ignore
+        Some(
+          timestamp,
+          level,
+          lowKey,
+          highKey,
+          indexBlockStartOffset,
+          indexEntriesCount
+        )
 
-                        if reader <> null then
-                            reader.Dispose()
+    let validateIndexData
+      (
+        timestamp,
+        level,
+        lowKey,
+        highKey,
+        indexBlockStartOffset,
+        indexEntriesCount
+      )
+      =
+      if indexEntriesCount < 0 then
+        Logger.Error
+          $"Invalid index entries count {indexEntriesCount} in SSTable '{path}'"
+        None
+      elif
+        indexBlockStartOffset < 0L
+        || indexBlockStartOffset >= fileStream.Length
+      then
+        Logger.Error
+          $"Invalid index block offset {indexBlockStartOffset} in SSTable '{path}'"
+        None
+      else
+        Some(
+          timestamp,
+          level,
+          lowKey,
+          highKey,
+          indexBlockStartOffset,
+          indexEntriesCount
+        )
 
-                        if fileStream <> null then
-                            fileStream.Dispose()
+    let readIndex(indexBlockStartOffset, indexEntriesCount) =
+      fileStream.Seek(indexBlockStartOffset, SeekOrigin.Begin)
+      |> ignore
+      let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
+      for i = 0 to indexEntriesCount - 1 do
+        recordOffsets[i] <- reader.ReadInt64()
+      recordOffsets
 
-                        None
-                    else
-                        // Now, move the file pointer back to the starting position of the footer content (timestamp).
-                        // The total amount of backtracking is footerSize + 4 bytes occupied by footerSize itself.
-                        fileStream.Seek(-(int64 footerSize + 4L), SeekOrigin.End) |> ignore
-
-                        let timestamp = reader.ReadInt64()
-                        let level = reader.ReadInt32()
-                        let lowKey = Serialization.readByteArray reader
-                        let highKey = Serialization.readByteArray reader
-                        let indexBlockStartOffset = reader.ReadInt64()
-                        let indexEntriesCount = reader.ReadInt32()
-                        reader.ReadInt32() |> ignore // Read and discard the footerSize field that we have already read
-
-                        // Validate index data
-                        if indexEntriesCount < 0 then
-                            Logger.Error $"Invalid index entries count {indexEntriesCount} in SSTable '{path}'"
-
-                            if reader <> null then
-                                reader.Dispose()
-
-                            if fileStream <> null then
-                                fileStream.Dispose()
-
-                            None
-                        elif indexBlockStartOffset < 0L || indexBlockStartOffset >= fileStream.Length then
-                            Logger.Error $"Invalid index block offset {indexBlockStartOffset} in SSTable '{path}'"
-
-                            if reader <> null then
-                                reader.Dispose()
-
-                            if fileStream <> null then
-                                fileStream.Dispose()
-
-                            None
-                        else
-                            // 2. Read index block (Index Block)
-                            fileStream.Seek(indexBlockStartOffset, SeekOrigin.Begin) |> ignore // Jump to the starting position of the index block
-
-                            let recordOffsets = Array.zeroCreate<int64> indexEntriesCount
-
-                            for i = 0 to indexEntriesCount - 1 do
-                                recordOffsets[i] <- reader.ReadInt64()
-
-                            Some(new SSTbl(path, timestamp, level, fileStream, reader, recordOffsets, lowKey, highKey))
-            with
-            | :? System.IO.IOException as ioEx when attempts < 3 ->
-                // Retry on I/O errors (file might be locked or being written)
-                Logger.Warn $"I/O error opening SSTable '{path}' (attempt {attempts + 1}): {ioEx.Message}"
-
-                if reader <> null then
-                    reader.Dispose()
-
-                if fileStream <> null then
-                    fileStream.Dispose()
-
-                System.Threading.Thread.Sleep 50 // Small delay before retry
-                tryOpen (attempts + 1)
-            | ex when attempts < 3 ->
-                // Retry on other errors
-                Logger.Warn $"Error opening SSTable '{path}' (attempt {attempts + 1}): {ex.Message}"
-
-                if reader <> null then
-                    reader.Dispose()
-
-                if fileStream <> null then
-                    fileStream.Dispose()
-
-                System.Threading.Thread.Sleep 50 // Small delay before retry
-                tryOpen (attempts + 1)
-            | ex ->
-                // Give up after retries
-                Logger.Error $"Failed to open SSTable '{path}' after {attempts + 1} attempts: {ex.Message}"
-
-                if reader <> null then
-                    reader.Dispose()
-
-                if fileStream <> null then
-                    fileStream.Dispose()
-
-                None
-
-        tryOpen 0
-
-    /// <summary>
-    /// Get the value location of the given key from SSTbl.
-    /// </summary>
-    /// <param name="sstbl">The SSTbl instance.</param>
-    /// <param name="key">The key to search for.</param>
-    /// <returns>
-    /// An Option type: Some ValueLocation if found, otherwise None.
-    /// </returns>
-    member _.TryGet(key: byte array) : ValueLocation option =
-        if recordOffsets.Length = 0 then
-            None // Empty SSTable
-
-        // Quick range check, if the key is outside the range of SSTable's LowKey and HighKey, return None
-        elif
-            ByteArrayComparer.ComparerInstance.Compare(key, lowKey) < 0
-            || ByteArrayComparer.ComparerInstance.Compare(key, highKey) > 0
-        then
-            None
-
+    let rec tryOpen attempts =
+      try
+        if not(validatePath path) then
+          None
         else
-            // Binary search on the RecordOffsets array in memory using tail recursion.
-            // Since RecordOffsets only stores offsets, we need to read the actual key from the file for each probe.
-            // Optimized to use readKeyForComparison which uses ArrayPool for small keys.
-            let rec binarySearch (low: int) (high: int) : ValueLocation option =
-                if low > high then
-                    None
-                else
-                    let midIdx = low + (high - low) / 2
-                    let currentOffset = recordOffsets[midIdx]
+          openFile()
 
-                    // Move the read/write position of the FileStream to the current offset
-                    fileStream.Seek(currentOffset, SeekOrigin.Begin) |> ignore
-                    // Use optimized key reading method that uses ArrayPool for small keys
-                    let currentKey = Serialization.readKeyForComparison reader // Read the key at the current position
-                    let cmp = ByteArrayComparer.ComparerInstance.Compare(key, currentKey) // Compare the target key and the current key
+          match readFooter() with
+          | None ->
+            cleanup()
+            None
+          | Some footerData ->
+            match validateIndexData footerData with
+            | None ->
+              cleanup()
+              None
+            | Some(timestamp,
+                   level,
+                   lowKey,
+                   highKey,
+                   indexBlockStartOffset,
+                   indexEntriesCount) ->
+              let recordOffsets =
+                readIndex(indexBlockStartOffset, indexEntriesCount)
+              Some(
+                new SSTbl(
+                  path,
+                  timestamp,
+                  level,
+                  fileStream,
+                  reader,
+                  recordOffsets,
+                  lowKey,
+                  highKey
+                )
+              )
+      with
+      | :? System.IO.IOException as ioEx when attempts < 3 ->
+        Logger.Warn
+          $"I/O error opening SSTable '{path}' (attempt {attempts + 1}): {ioEx.Message}"
+        cleanup()
+        System.Threading.Thread.Sleep 50
+        tryOpen(attempts + 1)
+      | ex when attempts < 3 ->
+        Logger.Warn
+          $"Error opening SSTable '{path}' (attempt {attempts + 1}): {ex.Message}"
+        cleanup()
+        System.Threading.Thread.Sleep 50
+        tryOpen(attempts + 1)
+      | ex ->
+        Logger.Error
+          $"Failed to open SSTable '{path}' after {attempts + 1} attempts: {ex.Message}"
+        cleanup()
+        None
 
-                    match cmp with
-                    | 0 ->
-                        // Found an exact match
-                        Some(Serialization.readValueLocation reader) // Read the corresponding value location
-                    | x when x < 0 ->
-                        // Target key is less than current key, continue searching in the left half
-                        binarySearch low (midIdx - 1)
-                    | _ ->
-                        // Target key is greater than current key, continue searching in the right half
-                        binarySearch (midIdx + 1) high
+    tryOpen 0
 
-            binarySearch 0 (recordOffsets.Length - 1)
+  /// <summary>
+  /// Get the value location of the given key from SSTbl.
+  /// </summary>
+  /// <param name="sstbl">The SSTbl instance.</param>
+  /// <param name="key">The key to search for.</param>
+  /// <returns>
+  /// An Option type: Some ValueLocation if found, otherwise None.
+  /// </returns>
+  member _.TryGet(key: byte array) : ValueLocation option =
+    if recordOffsets.Length = 0 then
+      None // Empty SSTable
 
-    /// <summary>
-    /// Close the underlying file stream of the SSTbl instance.
-    /// It is recommended to use the `use` keyword and the `IDisposable` implementation of SSTbl to automatically manage the lifecycle of the stream.
-    /// </summary>
-    member this.Close() : unit = this.FileStream.Close()
+    // Quick range check, if the key is outside the range of SSTable's LowKey and HighKey, return None
+    elif
+      ByteArrayComparer.ComparerInstance.Compare(key, lowKey) < 0
+      || ByteArrayComparer.ComparerInstance.Compare(key, highKey) > 0
+    then
+      None
+
+    else
+      // Binary search on the RecordOffsets array in memory using tail recursion.
+      // Since RecordOffsets only stores offsets, we need to read the actual key from the file for each probe.
+      // Optimized to use readKeyForComparison which uses ArrayPool for small keys.
+      let rec binarySearch (low: int) (high: int) : ValueLocation option =
+        if low > high then
+          None
+        else
+          let midIdx = low + (high - low) / 2
+          let currentOffset = recordOffsets[midIdx]
+
+          // Move the read/write position of the FileStream to the current offset
+          fileStream.Seek(currentOffset, SeekOrigin.Begin)
+          |> ignore
+          // Use optimized key reading method that uses ArrayPool for small keys
+          let currentKey = Serialization.readKeyForComparison reader // Read the key at the current position
+          let cmp =
+            ByteArrayComparer.ComparerInstance.Compare(key, currentKey) // Compare the target key and the current key
+
+          match cmp with
+          | 0 ->
+            // Found an exact match
+            Some(Serialization.readValueLocation reader) // Read the corresponding value location
+          | x when x < 0 ->
+            // Target key is less than current key, continue searching in the left half
+            binarySearch low (midIdx - 1)
+          | _ ->
+            // Target key is greater than current key, continue searching in the right half
+            binarySearch (midIdx + 1) high
+
+      binarySearch 0 (recordOffsets.Length - 1)
+
+  /// <summary>
+  /// Close the underlying file stream of the SSTbl instance.
+  /// It is recommended to use the `use` keyword and the `IDisposable` implementation of SSTbl to automatically manage the lifecycle of the stream.
+  /// </summary>
+  member this.Close() : unit = this.FileStream.Close()

@@ -7,8 +7,8 @@ open Ocis.Utils.Serialization
 open Ocis.Utils.Logger
 
 type WalEntry =
-    | Set of byte array * ValueLocation
-    | Delete of byte array
+  | Set of byte array * ValueLocation
+  | Delete of byte array
 
 /// <summary>
 /// Wal (Write Ahead Log) records all modifications to Memtbl to ensure durability and crash recovery.
@@ -19,143 +19,149 @@ type WalEntry =
 /// </remarks>
 type Wal(path: string, fileStream: FileStream) =
 
-    let path: string = path
-    let fileStream: FileStream = fileStream
+  let path: string = path
+  let fileStream: FileStream = fileStream
 
-    member _.Path = path
-    member _.FileStream = fileStream
+  member _.Path = path
+  member _.FileStream = fileStream
 
-    // Implements IDisposable to ensure the FileStream is properly closed
-    interface IDisposable with
-        member this.Dispose() = this.FileStream.Dispose()
+  // Implements IDisposable to ensure the FileStream is properly closed
+  interface IDisposable with
+    member this.Dispose() = this.FileStream.Dispose()
 
-    /// <summary>
-    /// Opens or creates a WAL file.
-    /// </summary>
-    /// <param name="path">The path of the WAL file.</param>
-    /// <returns>A Result type: returns Ok Wal instance if successful, otherwise returns an Error string.</returns>
-    static member Create(path: string) : Result<Wal, string> =
-        try
-            let fileStream =
-                new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read)
-            // Move the file pointer to the end of the file, ready to append new log entries
-            fileStream.Seek(0L, SeekOrigin.End) |> ignore
-            Ok(new Wal(path, fileStream))
-        with ex ->
-            Error $"Failed to open or create WAL file '{path}': {ex.Message}"
-
-    /// <summary>
-    /// Appends one WAL entry.
-    /// Callers are responsible for coordinating flush semantics.
-    /// </summary>
-    /// <param name="entry">The WalEntry to append.</param>
-    member _.Append(entry: WalEntry) : unit =
-        lock fileStream (fun () ->
-            use writer = new BinaryWriter(fileStream, System.Text.Encoding.UTF8, true) // true means the underlying stream will not be closed
-
-            match entry with
-            | WalEntry.Set(key, valueLocation) ->
-                writer.Write 0uy // 0 indicates Set type
-                Serialization.writeByteArray writer key
-                Serialization.writeValueLocation writer valueLocation
-            | WalEntry.Delete key ->
-                writer.Write 1uy // 1 indicates Delete type
-                Serialization.writeByteArray writer key
-
-        // fileStream.Flush() // Ensure data is written to disk (Moved to OcisDB for batched flushing)
+  /// <summary>
+  /// Opens or creates a WAL file.
+  /// </summary>
+  /// <param name="path">The path of the WAL file.</param>
+  /// <returns>A Result type: returns Ok Wal instance if successful, otherwise returns an Error string.</returns>
+  static member Create(path: string) : Result<Wal, string> =
+    try
+      let fileStream =
+        new FileStream(
+          path,
+          FileMode.OpenOrCreate,
+          FileAccess.ReadWrite,
+          FileShare.Read
         )
+      // Move the file pointer to the end of the file, ready to append new log entries
+      fileStream.Seek(0L, SeekOrigin.End) |> ignore
+      Ok(new Wal(path, fileStream))
+    with ex ->
+      Error $"Failed to open or create WAL file '{path}': {ex.Message}"
 
-    /// <summary>
-    /// Reads and replays all WAL entries for crash recovery.
-    /// </summary>
-    /// <param name="path">The path of the WAL file.</param>
-    /// <returns>A sequence containing all WalEntries.</returns>
-    static member Replay(path: string) : seq<WalEntry> =
-        seq {
-            if not (File.Exists path) then
-                yield! Seq.empty
-            else
-                try
-                    use fileStream =
-                        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+  /// <summary>
+  /// Appends one WAL entry.
+  /// Callers are responsible for coordinating flush semantics.
+  /// </summary>
+  /// <param name="entry">The WalEntry to append.</param>
+  member _.Append(entry: WalEntry) : unit =
+    lock fileStream (fun () ->
+      use writer =
+        new BinaryWriter(fileStream, System.Text.Encoding.UTF8, true) // true means the underlying stream will not be closed
 
-                    use reader = new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
+      match entry with
+      | WalEntry.Set(key, valueLocation) ->
+        writer.Write 0uy // 0 indicates Set type
+        Serialization.writeByteArray writer key
+        Serialization.writeValueLocation writer valueLocation
+      | WalEntry.Delete key ->
+        writer.Write 1uy // 1 indicates Delete type
+        Serialization.writeByteArray writer key
 
-                    // Recursive function to read entries functionally
-                    let rec readEntries () =
-                        seq {
-                            if fileStream.Position < fileStream.Length then
-                                try
-                                    let entryType = reader.ReadByte()
+    // fileStream.Flush() // Ensure data is written to disk (Moved to OcisDB for batched flushing)
+    )
 
-                                    match entryType with
-                                    | 0uy -> // Set type
-                                        let key = Serialization.readByteArray reader
-                                        let valueLocation = Serialization.readValueLocation reader
-                                        yield WalEntry.Set(key, valueLocation)
-                                        yield! readEntries ()
-                                    | 1uy -> // Delete type
-                                        let key = Serialization.readByteArray reader
-                                        yield WalEntry.Delete key
-                                        yield! readEntries ()
-                                    | _ ->
-                                        // Encountered unknown or corrupted entry, skip and continue
-                                        Logger.Warn
-                                            $"Encountered unknown WAL entry type {int entryType} in WAL file '{path}'."
+  /// <summary>
+  /// Reads and replays all WAL entries for crash recovery.
+  /// </summary>
+  /// <param name="path">The path of the WAL file.</param>
+  /// <returns>A sequence containing all WalEntries.</returns>
+  static member Replay(path: string) : seq<WalEntry> = seq {
+    if not(File.Exists path) then
+      yield! Seq.empty
+    else
+      try
+        use fileStream =
+          new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
 
-                                        yield! readEntries ()
-                                with :? EndOfStreamException ->
-                                    // File might be incomplete, or reached end of stream
-                                    Logger.Warn
-                                        $"Reached end of stream when replaying WAL file '{path}', file might be incomplete."
-                        }
+        use reader =
+          new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
 
-                    yield! readEntries ()
-                with
-                | :? EndOfStreamException ->
-                    // File might be incomplete, or reached end of stream
-                    Logger.Warn $"Reached end of stream when replaying WAL file '{path}', file might be incomplete."
-                | ex -> Logger.Error $"An error occurred when replaying WAL file '{path}': {ex.Message}"
+        // Recursive function to read entries functionally
+        let rec readEntries() = seq {
+          if fileStream.Position < fileStream.Length then
+            try
+              let entryType = reader.ReadByte()
+
+              match entryType with
+              | 0uy -> // Set type
+                let key = Serialization.readByteArray reader
+                let valueLocation = Serialization.readValueLocation reader
+                yield WalEntry.Set(key, valueLocation)
+                yield! readEntries()
+              | 1uy -> // Delete type
+                let key = Serialization.readByteArray reader
+                yield WalEntry.Delete key
+                yield! readEntries()
+              | _ ->
+                // Encountered unknown or corrupted entry, skip and continue
+                Logger.Warn
+                  $"Encountered unknown WAL entry type {int entryType} in WAL file '{path}'."
+
+                yield! readEntries()
+            with :? EndOfStreamException ->
+              // File might be incomplete, or reached end of stream
+              Logger.Warn
+                $"Reached end of stream when replaying WAL file '{path}', file might be incomplete."
         }
 
-    /// <summary>
-    /// Forces any buffered write data to be written to the underlying file, and then to the device.
-    /// This is crucial for data persistence.
-    /// </summary>
-    member _.Flush() : unit =
-        lock fileStream (fun () ->
-            fileStream.Flush())
+        yield! readEntries()
+      with
+      | :? EndOfStreamException ->
+        // File might be incomplete, or reached end of stream
+        Logger.Warn
+          $"Reached end of stream when replaying WAL file '{path}', file might be incomplete."
+      | ex ->
+        Logger.Error
+          $"An error occurred when replaying WAL file '{path}': {ex.Message}"
+  }
 
-    /// <summary>
-    /// Forces buffered WAL data to be flushed to durable storage.
-    /// </summary>
-    member _.FlushDurable() : unit =
-        lock fileStream (fun () ->
-            fileStream.Flush(true))
+  /// <summary>
+  /// Forces any buffered write data to be written to the underlying file, and then to the device.
+  /// This is crucial for data persistence.
+  /// </summary>
+  member _.Flush() : unit =
+    lock fileStream (fun () -> fileStream.Flush())
 
-    /// <summary>
-    /// Safely truncates the WAL after a durable checkpoint.
-    /// The durable flush before and after truncation prevents torn resets.
-    /// </summary>
-    member _.Reset() : unit =
-        lock fileStream (fun () ->
-            fileStream.Flush(true)
-            fileStream.SetLength(0L)
-            fileStream.Seek(0L, SeekOrigin.Begin) |> ignore
-            fileStream.Flush(true))
+  /// <summary>
+  /// Forces buffered WAL data to be flushed to durable storage.
+  /// </summary>
+  member _.FlushDurable() : unit =
+    lock fileStream (fun () -> fileStream.Flush(true))
 
-    /// <summary>
-    /// Closes the WAL file stream.
-    /// It is recommended to use the 'use' keyword with the Wal type, as it implements IDisposable.
-    /// </summary>
-    member _.Close() : unit = fileStream.Close()
+  /// <summary>
+  /// Safely truncates the WAL after a durable checkpoint.
+  /// The durable flush before and after truncation prevents torn resets.
+  /// </summary>
+  member _.Reset() : unit =
+    lock fileStream (fun () ->
+      fileStream.Flush(true)
+      fileStream.SetLength(0L)
+      fileStream.Seek(0L, SeekOrigin.Begin) |> ignore
+      fileStream.Flush(true))
 
-    /// <summary>
-    /// Explicitly dispose the WAL.
-    /// </summary>
-    /// <remarks>
-    /// This is an internal method that is used to dispose the WAL explicitly.
-    /// It is recommended to use the 'use' keyword with the Wal type, as it implements IDisposable.
-    /// </remarks>
-    [<Obsolete "This function should not be called directly.">]
-    member inline this.Dispose() = (this :> IDisposable).Dispose()
+  /// <summary>
+  /// Closes the WAL file stream.
+  /// It is recommended to use the 'use' keyword with the Wal type, as it implements IDisposable.
+  /// </summary>
+  member _.Close() : unit = fileStream.Close()
+
+  /// <summary>
+  /// Explicitly dispose the WAL.
+  /// </summary>
+  /// <remarks>
+  /// This is an internal method that is used to dispose the WAL explicitly.
+  /// It is recommended to use the 'use' keyword with the Wal type, as it implements IDisposable.
+  /// </remarks>
+  [<Obsolete "This function should not be called directly.">]
+  member inline this.Dispose() = (this :> IDisposable).Dispose()

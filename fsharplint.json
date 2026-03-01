@@ -1,0 +1,232 @@
+{
+  "ignoreFiles": [
+    "**/obj/**",
+    "**/bin/**",
+    "**/node_modules/**",
+    "**/*.AssemblyInfo.fs",
+    "**/.NETCoreApp*AssemblyAttributes.fs"
+  ],
+  "global": {
+    "numIndentationSpaces": 2,
+    "maxLineLength": 120
+  },
+  "indentation": {
+    "enabled": false
+  },
+  "recursiveTuplePattern": {
+    "enabled": false
+  },
+  "redundantNewKeyword": {
+    "enabled": false
+  },
+  "reimplementsFunction": {
+    "enabled": true
+  },
+  "canBeReplacedWithComposition": {
+    "enabled": true
+  },
+  "maxLinesInFunction": {
+    "enabled": true,
+    "config": {
+      "maxLines": 100
+    }
+  },
+  "maxLinesInMatchLambda": {
+    "enabled": true,
+    "config": {
+      "maxLines": 10
+    }
+  },
+  "maxLinesInValueBinding": {
+    "enabled": true,
+    "config": {
+      "maxLines": 40
+    }
+  },
+  "maxLinesInTypeDefinition": {
+    "enabled": true,
+    "config": {
+      "maxLines": 100
+    }
+  },
+  "cyclomaticComplexity": {
+    "enabled": true,
+    "config": {
+      "maxComplexity": 20
+    }
+  },
+  "nestingDepth": {
+    "enabled": true,
+    "config": {
+      "maxNestingDepth": 5
+    }
+  },
+  "numberOfItemsInTuple": {
+    "enabled": true,
+    "config": {
+      "maxItems": 4
+    }
+  },
+  "functionLength": {
+    "enabled": true,
+    "config": {
+      "maxLines": 30
+    }
+  },
+  "typeName": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None",
+      "suffix": null,
+      "prefix": null
+    }
+  },
+  "interfaceNames": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None",
+      "prefix": "I"
+    }
+  },
+  "typeNames": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None"
+    }
+  },
+  "recordFieldNames": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "AllowPrefix"
+    }
+  },
+  "enumCaseNames": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None"
+    }
+  },
+  "moduleNames": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None"
+    }
+  },
+  "moduleNaming": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None"
+    }
+  },
+  "namespaceNames": {
+    "enabled": true,
+    "config": {
+      "naming": "PascalCase",
+      "underscores": "None"
+    }
+  },
+  "memberNames": {
+    "enabled": false
+  },
+  "parameterNames": {
+    "enabled": true,
+    "config": {
+      "naming": "camelCase",
+      "underscores": "AllowPrefix"
+    }
+  },
+  "patternMatchClauses": {
+    "enabled": true,
+    "config": {
+      "maxClauses": 10
+    }
+  },
+  "tupleOfWildcards": {
+    "enabled": true
+  },
+  "minBlankLinesBeforeDeclaration": {
+    "enabled": false
+  },
+  "maxLinesInFile": {
+    "enabled": false
+  },
+  "wildcardNamedWithUnionCaseName": {
+    "enabled": false
+  },
+  "fsharpOptionNull": {
+    "enabled": true
+  },
+  "runtimeNullComparison": {
+    "enabled": true
+  },
+  "simplifyNegation": {
+    "enabled": true
+  },
+  "nestedStatements": {
+    "enabled": false
+  },
+  "dangerousStringInterpolation": {
+    "enabled": true
+  },
+  "useOfPrintf": {
+    "enabled": true
+  },
+  "failwithWithName": {
+    "enabled": true
+  },
+  "unknownTextFormatting": {
+    "enabled": true
+  },
+  "partOfName": {
+    "enabled": false
+  },
+  "disposableOneton": {
+    "enabled": true
+  },
+  "disposableTypesShouldHaveFinalizer": {
+    "enabled": true
+  },
+  "typeAnnotationInForLoop": {
+    "enabled": false
+  },
+  "avoidBlankLines": {
+    "enabled": false
+  },
+  "removeMultiLineDashes": {
+    "enabled": false
+  },
+  "closingTags": {
+    "enabled": false
+  },
+  "xmlDocBearers": {
+    "enabled": false
+  },
+  "defaultEncodingShouldBeUtf8": {
+    "enabled": false
+  },
+  "byteOrderMark": {
+    "enabled": false
+  },
+  "commentSpacing": {
+    "enabled": false
+  },
+  "noTabCharacters": {
+    "enabled": false
+  },
+  "maxCharactersOnLine": {
+    "enabled": false
+  },
+  "trailingWhitespaceOnLine": {
+    "enabled": true
+  },
+  "invalidNumberOfItems": {
+    "enabled": false
+  }
+}

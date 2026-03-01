@@ -1,0 +1,72 @@
+root = true
+
+[*]                     # rules that follow apply to files with any extension
+insert_final_newline    = false
+trim_trailing_whitespace = true
+indent_style            = space
+indent_size             = 2
+
+# ===========================| F# Configuration (OCaml-inspired style) |===========================
+[*.fs]
+
+# --- Basic Settings ------------------------------------------------------------
+indent_size              = 2
+max_line_length          = 80
+end_of_line              = lf
+insert_final_newline     = true
+
+# --- Spacing Options (OCaml-style compact formatting) --------------------------
+#  OCaml: let f(x) = ... | F#: let f (x) = ...
+fsharp_space_before_parameter                    = false
+fsharp_space_before_lowercase_invocation         = false    # OCaml: f(x) not f (x)
+fsharp_space_before_uppercase_invocation         = false
+fsharp_space_before_class_constructor            = false
+fsharp_space_before_member                       = false
+fsharp_space_before_colon                        = false    # OCaml: x: int not x : int
+fsharp_space_after_comma                         = true
+fsharp_space_before_semicolon                    = false
+fsharp_space_after_semicolon                     = true
+fsharp_space_around_delimiter                    = false    # OCaml: [1; 2] not [ 1; 2 ]
+
+# --- Width Constraints (Compact OCaml-style, 80-char margin) -------------------
+fsharp_max_if_then_else_short_width              = 40
+fsharp_max_if_then_short_width                   = 0       # 0 = always multiline
+fsharp_max_infix_operator_expression             = 50
+fsharp_max_record_width                          = 40
+fsharp_max_record_number_of_items                = 2
+fsharp_max_array_or_list_width                   = 40
+fsharp_max_array_or_list_number_of_items         = 2
+fsharp_max_value_binding_width                   = 60
+fsharp_max_function_binding_width                = 40
+
+# --- Multiline Formatting (Cramped style for compactness) ----------------------
+#  cramped: closing delimiter on same line as last element (most compact)
+#  aligned: closing delimiter aligned with opening delimiter
+#  stroustrup: closing delimiter on new line
+fsharp_multiline_bracket_style                   = cramped
+fsharp_record_multiline_formatter                = character_width
+fsharp_array_or_list_multiline_formatter         = character_width
+
+# --- Conventions (OCaml-style) -------------------------------------------------
+fsharp_newline_between_type_definition_and_members = false
+fsharp_align_function_signature_to_indentation   = true
+fsharp_alternative_long_member_definitions       = true
+fsharp_multi_line_lambda_closing_newline         = false
+fsharp_blank_lines_around_nested_multiline_expressions = false
+fsharp_bar_before_discriminated_union_declaration = false
+fsharp_keep_max_number_of_blank_lines            = 1
+fsharp_newline_before_multiline_computation_expression = false
+
+# --- Experimental Options ------------------------------------------------------
+fsharp_experimental_keep_indent_in_branch        = true
+fsharp_experimental_elmish                       = false
+
+# ===========================| F# Signature Files |==============================
+[*.fsi]
+indent_size              = 2
+max_line_length          = 80
+
+# ===========================| F# Script Files |=================================
+[*.fsx]
+indent_size              = 2
+max_line_length          = 80
