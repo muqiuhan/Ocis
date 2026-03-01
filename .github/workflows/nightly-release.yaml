@@ -25,8 +25,11 @@ jobs:
     if: needs.check-commits.outputs.count > '0'
     strategy:
       matrix:
+        # Using ubuntu-22.04 runner (glibc 2.31) for Linux builds to ensure compatibility
+        # with older Linux systems. Ubuntu 24.04 uses glibc 2.38+ which may not be available
+        # on older distributions.
         runtime: [linux-x64, osx-x64, win-x64]
-    runs-on: ${{ matrix.runtime == 'win-x64' && 'windows-latest' || (matrix.runtime == 'osx-x64' && 'macos-latest' || 'ubuntu-latest') }}
+    runs-on: ${{ matrix.runtime == 'win-x64' && 'windows-latest' || (matrix.runtime == 'osx-x64' && 'macos-latest' || 'ubuntu-22.04') }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup .NET
@@ -40,7 +43,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ocis.Server-${{ matrix.runtime }}
-          path: publish/${{ matrix.runtime }}
+          path: |
+            publish/${{ matrix.runtime }}/Ocis.Server
+            publish/${{ matrix.runtime }}/Ocis.Server.exe
 
   release:
     needs: [check-commits, build]
@@ -52,11 +57,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
+          pattern: Ocis.Server-*
+          merge-multiple: false
+      
+      - name: List downloaded files
+        run: find artifacts -type f
       
       - name: Prepare release
         id: prepare
@@ -67,12 +76,34 @@ jobs:
           git log --since="$YESTERDAY" --format='- %s' > commits.txt
       
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ steps.prepare.outputs.date }} Nightly Build
-          body_path: commits.txt
-          draft: true
-          files: |
-            artifacts/**/Ocis.Server
-            artifacts/**/Ocis.Server.exe
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.prepare.outputs.date }}-nightly"
+          # Delete existing release if exists
+          gh release delete "$TAG" --yes || true
+          # Create release without files first
+          gh release create "$TAG" \
+            --title "${{ steps.prepare.outputs.date }} Nightly Build" \
+            --notes-file commits.txt \
+            --draft
+          
+      - name: Upload Assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.prepare.outputs.date }}-nightly"
+          # Upload each artifact with unique name (including platform)
+          for f in $(find artifacts -type f \( -name "Ocis.Server" -o -name "Ocis.Server.exe" \)); do
+            # Extract platform from path (e.g., "linux-x64", "osx-x64", "win-x64")
+            PLATFORM=$(echo "$f" | sed -E 's|artifacts/Ocis.Server-([^/]+)/.*|\1|')
+            # Determine file extension
+            if [[ "$f" == *.exe ]]; then
+              ASSET_NAME="Ocis.Server-$PLATFORM.exe"
+            else
+              ASSET_NAME="Ocis.Server-$PLATFORM"
+            fi
+            # Copy with unique name and upload
+            cp "$f" "/tmp/$ASSET_NAME"
+            gh release upload "$TAG" "/tmp/$ASSET_NAME" --clobber
+          done
