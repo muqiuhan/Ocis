@@ -1,0 +1,78 @@
+name: Nightly Release
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-commits:
+    runs-on: ubuntu-latest
+    outputs:
+      count: ${{ steps.check.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
+          COUNT=$(git log --since="$YESTERDAY" --oneline | wc -l)
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-commits
+    if: needs.check-commits.outputs.count > '0'
+    strategy:
+      matrix:
+        runtime: [linux-x64, osx-x64, win-x64]
+    runs-on: ${{ matrix.runtime == 'win-x64' && 'windows-latest' || (matrix.runtime == 'osx-x64' && 'macos-latest' || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0'
+      - name: Publish
+        run: |
+          dotnet publish Ocis.Server/Ocis.Server.fsproj -c Release -r ${{ matrix.runtime }} -p:PublishAot=true --self-contained true -o publish/${{ matrix.runtime }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ocis.Server-${{ matrix.runtime }}
+          path: publish/${{ matrix.runtime }}
+
+  release:
+    needs: [check-commits, build]
+    if: needs.check-commits.outputs.count > '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      
+      - name: Prepare release
+        id: prepare
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
+          git log --since="$YESTERDAY" --format='- %s' > commits.txt
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.prepare.outputs.date }} Nightly Build
+          body_path: commits.txt
+          draft: true
+          files: |
+            artifacts/**/Ocis.Server
+            artifacts/**/Ocis.Server.exe
+          fail_on_unmatched_files: false
