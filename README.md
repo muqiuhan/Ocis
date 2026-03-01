@@ -2,61 +2,17 @@
 
 [中文](./REAMDE_zh.md) | **English**
 
-[![Build and Test](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml)
-[![Qodana](https://github.com/muqiuhan/Ocis/actions/workflows/qodana_code_quality.yml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/qodana_code_quality.yml)
+[![Build and Test](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/build-test.yaml) [![Nightly Full Tests](https://github.com/muqiuhan/Ocis/actions/workflows/nightly-full-tests.yaml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/nightly-full-tests.yaml) [![Nightly Release](https://github.com/muqiuhan/Ocis/actions/workflows/nightly-release.yaml/badge.svg)](https://github.com/muqiuhan/Ocis/actions/workflows/nightly-release.yaml)
 
-Ocis is a key-value storage project implemented in F# with two runnable forms:
+Ocis is a key-value storage engine implemented in F# on .NET 10. It provides two operational forms: an embedded storage engine (Ocis) and a TCP server. The embedded form allows developers to integrate the storage engine directly into application processes; the server form exposes SET/GET/DELETE operations via a custom binary protocol.
 
-- **Ocis**: An embedded storage engine with WiscKey-style key/value separation
-- **Ocis.Server**: A TCP server that exposes `SET/GET/DELETE` operations via a custom binary protocol
+Ocis is designed for single-node scenarios. It does not provide distributed replication, Raft consensus, or failover mechanisms. If your architecture requires cross-node data consistency, consider alternative solutions.
 
-## Project Overview
+## Architecture
 
-### What Ocis Is
-- Suitable for single-node deployments requiring a compact embedded engine and lightweight TCP server
-- Includes durability modes (`Strict`, `Balanced`, `Fast`), WAL replay, SSTable compaction, and recovery tests
+Ocis adopts a WiscKey-style key-value separation design. WiscKey is a variant of LSM-Tree architecture, proposed by Lu et al. in the 2017 paper [WiscKey: Separating Keys from Values in SSD-conscious Storage](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf). Its core idea is separating keys from values: key metadata is stored in LSM-Tree, while values are stored in an append-only log (ValueLog). This design reduces both write amplification and space amplification.
 
-### What Ocis Is Not
-- Not a distributed/replicated database (no Raft, no multi-node consistency, no built-in failover)
-
-## Project Structure
-
-```
-Ocis/
-├── Ocis/                      # Core storage engine
-│   ├── Ocis.fs               # Main engine implementation
-│   └── Ocis.fsproj           # Project file
-├── Ocis.Server/              # TCP server
-│   ├── Program.fs            # CLI entry point
-│   ├── Config.fs             # Configuration validation
-│   ├── Host.fs               # Hosted service
-│   ├── Server.fs             # TCP server
-│   ├── DbDispatcher.fs       # Database dispatcher
-│   └── Ocis.Server.fsproj    # Project file
-├── Ocis.Tests/               # Engine tests
-├── Ocis.Server.Tests/        # Server tests
-├── Ocis.Perf/                # Performance testing tools
-└── Ocis.Perf.Tests/          # Performance test validation
-```
-
-## Architecture and Technology Stack
-
-### Technology Stack
-- **Language/Runtime**: F# on .NET 10
-- **Hosting Framework**: `Microsoft.Extensions.Hosting`
-- **Logging**: `Microsoft.Extensions.Logging`
-- **CLI Framework**: `FSharp.SystemCommandLine`
-
-### Concurrency Model
-- **Engine**: Strict single-thread affinity with fail-fast thread checks
-- **Server**: Bounded queue + dedicated dispatcher thread with asynchronous request processing
-
-### Storage Design
-- **Key Metadata**: Stored in Memtable/SSTable
-- **Value Data**: Stored in append-only ValueLog
-- **Durability**: WAL (Write-Ahead Log) for durability and replay
-
-## Request/Data Flow
+Ocis follows this approach. Key metadata is stored in Memtable and SSTable, while value data is written to an append-only ValueLog. In large-value scenarios, traditional LSM-Tree requires repeated reads and writes of complete key-value pairs during compaction. With key-value separation, compaction only processes metadata, significantly reducing write amplification. WAL (Write-Ahead Log) ensures write durability and supports crash recovery through replay.
 
 ```mermaid
 flowchart LR
@@ -74,130 +30,128 @@ flowchart LR
   R --> C
 ```
 
+The engine core enforces a strict single-thread affinity model. All operations on Memtable, WAL, and ValueLog execute on the same thread; thread check failures immediately throw exceptions. This design eliminates internal lock contention and simplifies state management complexity. The TCP server layer receives requests through a bounded queue, with a dedicated dispatcher thread serializing execution, bridging concurrent requests to the single-threaded engine.
+
+The technology stack uses `Microsoft.Extensions.Hosting` as the hosting framework, `Microsoft.Extensions.Logging` for logging output, and `FSharp.SystemCommandLine` for CLI interface construction.
+
 ## Durability Modes
 
-- **Strict**: Each write waits for durable WAL flush before success (highest durability)
-- **Balanced**: Group commit (time window + batch size trigger) - best for multi-threaded servers
-- **Fast**: No per-request durable wait (highest throughput, weakest durability)
+Ocis provides three durability modes, representing different trade-offs between performance and durability.
 
-### When to Use Each Mode
+Strict mode requires each write operation to wait for WAL durable flush completion before returning success. This guarantees the highest durability but each write blocks on disk I/O.
 
-| Scenario | Recommended Mode | Reason |
-| -------- | ---------------- | ------ |
-| Single-thread engine (embedded) | **Fast** or **Strict** | Balanced has no advantage in single-thread |
-| Multi-thread server | **Balanced** | Group commit provides 7.6x throughput over Strict |
+Fast mode does not wait for per-request durability confirmation. Write operations return immediately after submission, with durability handled asynchronously in the background. This provides the highest throughput but may lose the most recent batch of writes on crash.
 
-**Note:** Balanced mode's group commit advantage only appears under concurrent multi-threaded workloads. In single-threaded scenarios, the time window triggers so frequently that Balanced actually performs worse than Strict.
+Balanced mode adopts a group commit strategy. Requests enter a wait queue after arrival; when the queue reaches batch threshold or time window timeout, a single WAL flush is triggered and all waiters are batch-woken. The core advantage of group commit lies in merging multiple disk I/Os into one. This advantage only holds under concurrent scenarios: in single-threaded environments, each request waits alone for window timeout, making it slower than Strict mode. Test data shows that with 32 concurrent writes, Balanced mode throughput is 7.6x that of Strict, with p99 latency reduced by 79%.
 
-## Implementation Notes
+| Mode     | Throughput Priority | Durability Priority | Use Case                |
+|----------|---------------------|---------------------|-------------------------|
+| Fast     | Highest             | Lowest              | Cache, rebuildable data |
+| Strict   | Lowest              | Highest             | Financial, audit logs   |
+| Balanced | Medium              | Medium              | Multi-threaded servers  |
 
-- Strict single-thread engine is enforced by thread affinity checks in core operations
-- Server dispatcher binds the engine to a dedicated worker thread
-- Balanced durability was optimized to avoid dispatcher head-of-line blocking by deferred commit waiting
-- WAL checkpoint/reset is implemented and covered by tests
+Single-threaded embedded scenarios should choose Fast or Strict, not Balanced.
 
-## Performance Results
+## Performance Data
 
-Environment: Local developer machine, single-node, `value=256B`, short repeated runs from `Ocis.Perf` aggregate outputs in `BenchmarkDotNet.Artifacts/results/throughput/`.
+The following data comes from throughput tests in a local development environment. Test conditions: value=256B, single-node, aggregated results in `BenchmarkDotNet.Artifacts/results/throughput/`. These data serve as in-repository performance baselines and do not constitute cross-hardware comparison benchmarks.
 
-### Engine (workers=1)
+### Engine Throughput (Single-threaded)
 
-| Mode     | Workload | Throughput (ops/s) | p99 (ms) |
-| -------- | -------- | -----------------: | -------: |
-| Fast     | set      |         86,813.97 |     0.01 |
-| Strict   | set      |          2,140.32 |     0.64 |
-| Balanced | set      |            624.21 |     1.98 |
-| Balanced | get      |         778,993.12 |    ~0.01 |
+| Mode     | SET ops/s | GET ops/s |
+|----------|----------:|----------:|
+| Fast     |  86,814   | -         |
+| Strict   |   2,140   | -         |
+| Balanced |     624   |  778,993  |
 
-**Note:** In single-threaded engine, Balanced mode (with optimized 1ms window) is actually slower than Strict. This is because group commit only helps under concurrent multi-threaded workloads.
+Balanced mode performs worse than Strict in single-threaded SET scenarios. The reason is that group commit's time window becomes an additional latency source without concurrency.
 
-### Server (workers=32, set)
+### Server Throughput (32 Concurrent, SET)
 
-| Mode     |     ops/s | p99 (ms) |
-| -------- | --------: | -------: |
-| Fast     | 35,196.24 |    21.07 |
-| Balanced |  3,109.27 |    19.79 |
-| Strict   |    410.06 |    94.04 |
+| Mode     | ops/s   | p99 (ms) |
+|----------|--------:|---------:|
+| Fast     | 35,196  | 21       |
+| Balanced |  3,109  | 20       |
+| Strict   |    410  | 94       |
 
-**Analysis:**
-- Balanced provides **7.6x throughput** over Strict (3,109 vs 410 ops/s)
-- Balanced provides **4.8x lower p99 latency** than Strict (19.79 vs 94.04 ms)
-- Group commit shines under concurrent multi-threaded workloads
+In multi-threaded server scenarios, Balanced provides approximately 7.6x throughput improvement over Strict, with p99 latency reduced from 94ms to 20ms.
 
-**Notes:**
-- These are not cross-machine benchmark claims; treat them as current repository baseline snapshots
-- Default group commit parameters: `--group-commit-window-ms 1 --group-commit-batch-size 10`
-
-## Build, Run, Test
-
-### Build
+## Quick Start
 
 ```bash
 dotnet build Ocis.sln -c Release
 ```
 
-### Run Server
-
-`working-dir` is a required positional argument. **Note:** The directory must exist before running.
+Create the data directory before running the server:
 
 ```bash
-# Create the data directory first
 mkdir -p ./data
-
-# Run the server
 dotnet run --project Ocis.Server/Ocis.Server.fsproj -- ./data \
   --host 0.0.0.0 \
   --port 7379 \
-  --max-connections 1000 \
-  --flush-threshold 1000 \
   --durability-mode Balanced \
-  --group-commit-window-ms 1 \
-  --group-commit-batch-size 10 \
-  --db-queue-capacity 8192 \
-  --checkpoint-min-interval-ms 30000 \
   --log-level Info
 ```
 
-### Run Tests
+For complete parameter descriptions, see `Ocis.Server --help`.
+
+Run tests:
 
 ```bash
-# Engine + server tests
 dotnet test Ocis.Tests/Ocis.Tests.fsproj --filter "TestCategory!=Slow"
 dotnet test Ocis.Server.Tests/Ocis.Server.Tests.fsproj
-
-# Performance harness tests
-dotnet test Ocis.Perf.Tests/Ocis.Perf.Tests.fsproj
 ```
 
-## Performance Testing and Deployment
+## Deployment
 
-### Throughput Benchmark Commands
+Complete the following preparations before production deployment:
 
-```bash
-# Engine matrix (strict single-thread baseline)
-bash scripts/run-throughput-engine.sh
+- Configure TLS termination and authentication (recommended via reverse proxy or gateway)
+- Establish monitoring to track request latency, error rate, dispatcher queue depth, and WAL growth
+- Execute crash recovery tests and throughput verification
 
-# Server matrix
-bash scripts/run-throughput-server.sh 127.0.0.1 7379
+Related operations documentation: `docs/operations/production-runbook.md`, `docs/operations/release-checklist.md`, `docs/operations/rollback-playbook.md`.
+
+## Project Structure
+
+```
+Ocis/
+├── Ocis/                 # Core storage engine
+├── Ocis.Server/          # TCP server
+├── Ocis.Tests/           # Engine tests
+├── Ocis.Server.Tests/    # Server tests
+├── Ocis.Perf/            # Performance testing tools
+└── Ocis.Perf.Tests/      # Performance test validation
 ```
 
-See `docs/operations/performance-testing.md` for warmup/repeat/aggregation format and interpretation.
+## [LICENSE](./LICENSE)
 
-### Deployment Guidance
+```
+Copyright (c) 2025 ~ 2026 Somhairle H. Marisol
 
-**Suitable for:**
-- Single-node service deployment with explicit durability mode selection
+All rights reserved.
 
-**For production exposure:**
-- Put TLS/auth in front (reverse proxy / gateway)
-- Monitor request latency, error rate, dispatcher queue depth, and WAL growth
-- Run crash-recovery and throughput checks before release
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
 
-**Related documentation:**
-- `docs/operations/production-runbook.md`
-- `docs/operations/release-checklist.md`
-- `docs/operations/rollback-playbook.md`
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice,
+      this list of conditions and the following disclaimer in the documentation
+      and/or other materials provided with the distribution.
+    * Neither the name of Ocis nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
 
-## License
-
-See [LICENSE](./LICENSE).
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
