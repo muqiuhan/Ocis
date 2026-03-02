@@ -15,6 +15,10 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Perf", "Ocis.Perf\Ocis
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Perf.Tests", "Ocis.Perf.Tests\Ocis.Perf.Tests.fsproj", "{0ED003CC-B678-4F51-A41D-D422722C75A4}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Client", "Ocis.Client\Ocis.Client.fsproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ocis.Client.Tests", "Ocis.Client.Tests\Ocis.Client.Tests.fsproj", "{B2C3D4E5-F6A7-8901-BCDE-F12345678901}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

@@ -1,14 +1,15 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="UnitTest1.fs" />
+    <Compile Include="ProtocolTests.fs" />
+    <Compile Include="ClientTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -21,11 +22,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Ocis.Protocol.fsproj" />
+    <ProjectReference Include="..\Ocis.Client\Ocis.Client.fsproj" />
+    <ProjectReference Include="..\Ocis.Server\Ocis.Server.fsproj" />
+    <ProjectReference Include="..\Ocis\Ocis.fsproj" />
   </ItemGroup>
-
-  <Target Name="SDK" DependsOnTargets="Build">
-  </Target>
-
 
 </Project>

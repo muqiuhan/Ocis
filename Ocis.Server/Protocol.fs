@@ -1,5 +1,6 @@
 module Ocis.Server.Protocol
 
+open System
 open System.IO
 open System.Text
 open Ocis.Server.ProtocolSpec
@@ -144,3 +145,97 @@ module Protocol =
   let IsValidPacketSize(totalLength: int32) =
     totalLength >= HEADER_SIZE
     && totalLength <= (10 * 1024 * 1024) // Maximum 10MB
+
+  /// Serialize a request packet to bytes.
+  let SerializeRequest(packet: RequestPacket) =
+    use ms = new MemoryStream()
+    use writer = new BinaryWriter(ms)
+
+    writer.Write packet.MagicNumber
+    writer.Write packet.Version
+    writer.Write(byte packet.CommandType)
+    writer.Write packet.TotalPacketLength
+    writer.Write packet.KeyLength
+    writer.Write packet.ValueLength
+    writer.Write packet.Key
+
+    match packet.Value with
+    | Some value -> writer.Write value
+    | None -> ()
+
+    ms.ToArray()
+
+  /// Protocol parse result
+  type ParseResult<'T> =
+    | ParseSuccess of 'T
+    | ParseError of string
+    | InsufficientData
+
+  /// Deserialize a response packet from bytes.
+  let DeserializeResponse(buffer: byte array) : ParseResult<ResponsePacket> =
+    try
+      if buffer.Length < HEADER_SIZE then
+        InsufficientData
+      else
+        let mutable offset = 0
+
+        let magicNumber = BitConverter.ToUInt32(buffer, offset)
+        offset <- offset + 4
+
+        let version = buffer.[offset]
+        offset <- offset + 1
+
+        let statusCode =
+          LanguagePrimitives.EnumOfValue<byte, StatusCode>(buffer.[offset])
+
+        offset <- offset + 1
+
+        let totalPacketLength = BitConverter.ToInt32(buffer, offset)
+        offset <- offset + 4
+
+        let valueLength = BitConverter.ToInt32(buffer, offset)
+        offset <- offset + 4
+
+        let errorMessageLength = BitConverter.ToInt32(buffer, offset)
+        offset <- offset + 4
+
+        if buffer.Length < totalPacketLength then
+          InsufficientData
+        elif not(IsValidHeader magicNumber version) then
+          ParseError "invalid header"
+        elif valueLength < 0 || errorMessageLength < 0 then
+          ParseError "invalid length field"
+        elif
+          totalPacketLength
+          <> HEADER_SIZE + valueLength + errorMessageLength
+        then
+          ParseError "packet length mismatch"
+        else
+          let value =
+            if valueLength > 0 then
+              Some(Array.sub buffer offset valueLength)
+            else
+              None
+
+          offset <- offset + valueLength
+
+          let errorMessage =
+            if errorMessageLength > 0 then
+              let errorBytes = Array.sub buffer offset errorMessageLength
+              Some(Encoding.UTF8.GetString errorBytes)
+            else
+              None
+
+          let packet =
+            {MagicNumber = magicNumber
+             Version = version
+             StatusCode = statusCode
+             TotalPacketLength = totalPacketLength
+             ValueLength = valueLength
+             ErrorMessageLength = errorMessageLength
+             Value = value
+             ErrorMessage = errorMessage}
+
+          ParseSuccess packet
+    with ex ->
+      ParseError(sprintf "error parsing response: %s" ex.Message)
