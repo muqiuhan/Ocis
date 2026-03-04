@@ -11,40 +11,40 @@ open System.Threading.Tasks
 /// Tests for sequential operations in OcisDB to ensure correctness and data integrity
 /// </summary>
 [<TestFixture>]
-type SequentialOperationTests() =
+type SequentialOperationTests () =
 
   let tempDir = "temp_sequential_tests"
   let mutable dbPath = ""
-  let mutable db: OcisDB | null = null
+  let mutable db : OcisDB | null = null
 
   [<SetUp>]
-  member this.Setup() =
+  member this.Setup () =
     if Directory.Exists tempDir then
-      Directory.Delete(tempDir, true)
+      Directory.Delete (tempDir, true)
 
     Directory.CreateDirectory tempDir |> ignore
-    dbPath <- Path.Combine(tempDir, "sequential_test_db")
+    dbPath <- Path.Combine (tempDir, "sequential_test_db")
 
-    match OcisDB.Open(dbPath, 1000) with
+    match OcisDB.Open (dbPath, 1000) with
     | Ok newDb -> db <- newDb
     | Error msg -> Assert.Fail $"Failed to create test DB: {msg}"
 
   [<TearDown>]
-  member this.TearDown() =
+  member this.TearDown () =
     if db <> null then
-      (db :> System.IDisposable).Dispose()
+      (db :> System.IDisposable).Dispose ()
 
     if Directory.Exists tempDir then
-      Directory.Delete(tempDir, true)
+      Directory.Delete (tempDir, true)
 
   [<Test>]
-  member this.SequentialReads_ShouldWorkCorrectly() =
+  member this.SequentialReads_ShouldWorkCorrectly () =
     // Pre-populate with data
     for i = 0 to 99 do
       let key = Encoding.UTF8.GetBytes $"shared_key_{i:D3}"
       let value = Encoding.UTF8.GetBytes $"shared_value_{i}"
-      let setResult = db.Set(key, value)
-      Assert.That(setResult.IsOk, Is.True)
+      let setResult = db.Set (key, value)
+      Assert.That (setResult.IsOk, Is.True)
 
     // Test sequential reads
     let readOperation i () =
@@ -54,11 +54,11 @@ type SequentialOperationTests() =
           let getResult = db.Get key
 
           match getResult with
-          | Ok(Some value) ->
+          | Ok (Some value) ->
             let expectedValue = $"shared_value_{j}"
             let actualValue = Encoding.UTF8.GetString value
 
-            Assert.That(
+            Assert.That (
               actualValue,
               Is.EqualTo expectedValue,
               $"Operation {i}: Wrong value for key {j}"
@@ -72,18 +72,20 @@ type SequentialOperationTests() =
       readOperation i ()
 
   [<Test>]
-  member this.SequentialWrites_ShouldNotCorruptData() =
+  member this.SequentialWrites_ShouldNotCorruptData () =
     let writeOperation operationId () =
       do
         for i = 0 to 49 do
           let key =
             Encoding.UTF8.GetBytes $"operation_{operationId}_key_{i:D4}"
+
           let value =
             Encoding.UTF8.GetBytes $"operation_{operationId}_value_{i}"
-          let setResult = db.Set(key, value)
+
+          let setResult = db.Set (key, value)
 
           match setResult with
-          | Ok() -> ()
+          | Ok () -> ()
           | Error msg ->
             Assert.Fail $"Operation {operationId}: Failed to set key {i}: {msg}"
 
@@ -96,13 +98,14 @@ type SequentialOperationTests() =
       for i = 0 to 49 do
         let key =
           Encoding.UTF8.GetBytes $"operation_{operationId}_key_{i:D4}"
+
         let getResult = db.Get key
 
         match getResult with
-        | Ok(Some value) ->
+        | Ok (Some value) ->
           let expectedValue = $"operation_{operationId}_value_{i}"
           let actualValue = Encoding.UTF8.GetString value
-          Assert.That(actualValue, Is.EqualTo expectedValue)
+          Assert.That (actualValue, Is.EqualTo expectedValue)
         | Ok None ->
           Assert.Fail $"Key operation_{operationId}_key_{i:D4} not found"
         | Error msg ->
@@ -110,7 +113,7 @@ type SequentialOperationTests() =
             $"Error reading key operation_{operationId}_key_{i:D4}: {msg}"
 
   [<Test>]
-  member this.SequentialReadWrite_ShouldMaintainConsistency() =
+  member this.SequentialReadWrite_ShouldMaintainConsistency () =
     let writeCount = ref 0
 
     // Execute write operations sequentially
@@ -120,10 +123,10 @@ type SequentialOperationTests() =
         let key = Encoding.UTF8.GetBytes $"rw_key_{keyIndex:D6}"
 
         let value = Encoding.UTF8.GetBytes $"rw_value_{keyIndex}"
-        let setResult = db.Set(key, value)
+        let setResult = db.Set (key, value)
 
         match setResult with
-        | Ok() -> ()
+        | Ok () -> ()
         | Error msg ->
           Assert.Fail $"Operation {operationId}: Write operation failed: {msg}"
 
@@ -138,7 +141,7 @@ type SequentialOperationTests() =
         let getResult = db.Get key
 
         match getResult with
-        | Ok(Some value) ->
+        | Ok (Some value) ->
           let expectedValue = $"rw_value_{currentCount}"
           let actualValue = Encoding.UTF8.GetString value
 
@@ -152,35 +155,35 @@ type SequentialOperationTests() =
           Assert.Fail $"Operation {operationId}: Read operation failed: {msg}"
 
   [<Test>]
-  member this.MemtableFlushDuringSequentialOperations_ShouldWork() =
+  member this.MemtableFlushDuringSequentialOperations_ShouldWork () =
     // Fill memtable to trigger flush
     for i = 0 to 999 do
       let key = Encoding.UTF8.GetBytes $"flush_test_key_{i:D4}"
       let value = Encoding.UTF8.GetBytes $"flush_test_value_{i}"
-      let setResult = db.Set(key, value)
-      Assert.That(setResult.IsOk, Is.True)
+      let setResult = db.Set (key, value)
+      Assert.That (setResult.IsOk, Is.True)
 
     // Start sequential operations that might trigger flush
-    let sequentialOperation() =
+    let sequentialOperation () =
       do
         for i = 0 to 49 do
           let key = Encoding.UTF8.GetBytes $"sequential_key_{i:D3}"
           let value = Encoding.UTF8.GetBytes $"sequential_value_{i}"
-          let setResult = db.Set(key, value)
+          let setResult = db.Set (key, value)
 
           match setResult with
-          | Ok() -> ()
+          | Ok () -> ()
           | Error msg -> Assert.Fail $"Sequential set failed: {msg}"
 
           // Read a key that might be in the process of being flushed
           let getResult =
-            db.Get(Encoding.UTF8.GetBytes $"flush_test_key_{i:D4}")
+            db.Get (Encoding.UTF8.GetBytes $"flush_test_key_{i:D4}")
 
           match getResult with
-          | Ok(Some value) ->
+          | Ok (Some value) ->
             let expectedValue = $"flush_test_value_{i}"
             let actualValue = Encoding.UTF8.GetString value
-            Assert.That(actualValue, Is.EqualTo expectedValue)
+            Assert.That (actualValue, Is.EqualTo expectedValue)
           | Ok None ->
             Assert.Fail
               $"Flush test key {i} not found during sequential operations"
@@ -188,26 +191,26 @@ type SequentialOperationTests() =
 
     // Run multiple operations sequentially
     for _ = 0 to 4 do
-      sequentialOperation()
+      sequentialOperation ()
 
   [<Test>]
-  member this.DatabaseReopenDuringOperations_ShouldFailGracefully() =
+  member this.DatabaseReopenDuringOperations_ShouldFailGracefully () =
     // This test verifies that operations fail gracefully if the database is closed
     // during sequential operations
 
-    let operationThatMightFail() =
+    let operationThatMightFail () =
       do
         try
           for i = 0 to 9 do
             let key = Encoding.UTF8.GetBytes $"reopen_test_key_{i}"
             let value = Encoding.UTF8.GetBytes $"reopen_test_value_{i}"
-            let setResult = db.Set(key, value)
+            let setResult = db.Set (key, value)
 
             match setResult with
-            | Ok() -> ()
+            | Ok () -> ()
             | Error msg ->
               // Expected to fail if DB is closed
-              if not(msg.Contains "disposed" || msg.Contains "closed") then
+              if not (msg.Contains "disposed" || msg.Contains "closed") then
                 Assert.Fail $"Unexpected error during reopen test: {msg}"
         with
         | :? System.ObjectDisposedException ->
@@ -218,12 +221,12 @@ type SequentialOperationTests() =
 
     // Start operations
     let operations =
-      [0..2]
-      |> List.map(fun _ -> operationThatMightFail())
+      [ 0..2 ]
+      |> List.map (fun _ -> operationThatMightFail ())
 
     // Close the database first
     if db <> null then
-      (db :> System.IDisposable).Dispose()
+      (db :> System.IDisposable).Dispose ()
 
     // Execute operations synchronously and check they handle the closure gracefully
     for op in operations do
@@ -231,87 +234,88 @@ type SequentialOperationTests() =
         op
       with
       | :? System.ObjectDisposedException -> ()
-      | :? NUnit.Framework.AssertionException -> reraise()
+      | :? NUnit.Framework.AssertionException -> reraise ()
       | ex -> Assert.Fail $"Unexpected exception type: {ex.GetType().Name}"
 
   [<Test>]
   [<Category("Slow")>]
-  member this.LongRunningOperations_ShouldCompleteSuccessfully() =
-    let longRunningOperation() =
+  member this.LongRunningOperations_ShouldCompleteSuccessfully () =
+    let longRunningOperation () =
       do
         // Simulate a long-running operation
         for i = 0 to 999 do
           let key = Encoding.UTF8.GetBytes $"long_running_key_{i:D4}"
-          let value = Encoding.UTF8.GetBytes(new string('X', 1000)) // 1KB values
-          let setResult = db.Set(key, value)
+          let value = Encoding.UTF8.GetBytes (new string ('X', 1000)) // 1KB values
+          let setResult = db.Set (key, value)
 
           match setResult with
-          | Ok() -> ()
+          | Ok () -> ()
           | Error msg ->
             Assert.Fail $"Long running operation failed at {i}: {msg}"
 
           // Small yield to allow other operations (though sequential)
-          System.Threading.Thread.Sleep(1)
+          System.Threading.Thread.Sleep (1)
 
-    let quickOperations() =
+    let quickOperations () =
       do
         for i = 0 to 99 do
           let key = Encoding.UTF8.GetBytes $"quick_key_{i:D3}"
           let value = Encoding.UTF8.GetBytes $"quick_value_{i}"
-          let setResult = db.Set(key, value)
+          let setResult = db.Set (key, value)
 
           match setResult with
-          | Ok() -> ()
+          | Ok () -> ()
           | Error msg -> Assert.Fail $"Quick operation failed at {i}: {msg}"
 
     // Execute long-running operation synchronously
-    longRunningOperation()
+    longRunningOperation ()
 
     // Execute multiple quick operations sequentially
     for _ in 0..4 do
-      quickOperations()
+      quickOperations ()
 
   // All operations completed synchronously
 
   [<Test>]
   [<Category("Slow")>]
-  member this.BackgroundOperations_ShouldHandleSequentialRequests() =
+  member this.BackgroundOperations_ShouldHandleSequentialRequests () =
     // Test that background operations (compaction, GC, flush) work correctly with sequential requests
 
-    let triggerOperations() =
+    let triggerOperations () =
       // Trigger multiple compactions and GC synchronously
       for i = 0 to 4 do
-        db.PerformCompaction()
-        db.PerformGarbageCollection()
+        db.PerformCompaction ()
+        db.PerformGarbageCollection ()
 
     // Add some data to potentially trigger background operations
     for i = 0 to 499 do
       let key = Encoding.UTF8.GetBytes $"background_test_key_{i:D4}"
       let value = Encoding.UTF8.GetBytes $"background_test_value_{i}"
-      let setResult = db.Set(key, value)
-      Assert.That(setResult.IsOk, Is.True)
+      let setResult = db.Set (key, value)
+      Assert.That (setResult.IsOk, Is.True)
 
     // Force flush all data to disk before triggering background operations
-    db.WAL.Flush()
-    db.ValueLog.Flush()
+    db.WAL.Flush ()
+    db.ValueLog.Flush ()
 
     // Trigger sequential background operations
-    triggerOperations()
+    triggerOperations ()
 
     // Give background operations time to process
     Thread.Sleep 100
 
     // Database should still be functional - try to read a few keys
-    let testKeys = [0; 100; 200; 499]
+    let testKeys = [ 0 ; 100 ; 200 ; 499 ]
     let mutable successCount = 0
 
     for i in testKeys do
       let testKey =
         Encoding.UTF8.GetBytes $"background_test_key_{i:D4}"
+
       let getResult = db.Get testKey
 
       match getResult with
-      | Ok(Some value) ->
+      | Ok (Some value) ->
         let expectedValue = $"background_test_value_{i}"
         let actualValue = Encoding.UTF8.GetString value
 
@@ -320,7 +324,7 @@ type SequentialOperationTests() =
       | _ -> ()
 
     // At least some keys should be readable after background operations
-    Assert.That(
+    Assert.That (
       successCount,
       Is.GreaterThan 0,
       "At least some test keys should be readable after background operations"

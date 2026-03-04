@@ -17,16 +17,16 @@ insert_final_newline     = true
 
 # --- Spacing Options (OCaml-style compact formatting) --------------------------
 #  OCaml: let f(x) = ... | F#: let f (x) = ...
-fsharp_space_before_parameter                    = false
-fsharp_space_before_lowercase_invocation         = false    # OCaml: f(x) not f (x)
-fsharp_space_before_uppercase_invocation         = false
-fsharp_space_before_class_constructor            = false
-fsharp_space_before_member                       = false
-fsharp_space_before_colon                        = false    # OCaml: x: int not x : int
+fsharp_space_before_parameter                    = true
+fsharp_space_before_lowercase_invocation         = true
+fsharp_space_before_uppercase_invocation         = true
+fsharp_space_before_class_constructor            = true
+fsharp_space_before_member                       = true
+fsharp_space_before_colon                        = true
 fsharp_space_after_comma                         = true
-fsharp_space_before_semicolon                    = false
+fsharp_space_before_semicolon                    = true
 fsharp_space_after_semicolon                     = true
-fsharp_space_around_delimiter                    = false    # OCaml: [1; 2] not [ 1; 2 ]
+fsharp_space_around_delimiter                    = true
 
 # --- Width Constraints (Compact OCaml-style, 80-char margin) -------------------
 fsharp_max_if_then_else_short_width              = 40
@@ -51,15 +51,15 @@ fsharp_array_or_list_multiline_formatter         = character_width
 fsharp_newline_between_type_definition_and_members = false
 fsharp_align_function_signature_to_indentation   = true
 fsharp_alternative_long_member_definitions       = true
-fsharp_multi_line_lambda_closing_newline         = false
-fsharp_blank_lines_around_nested_multiline_expressions = false
-fsharp_bar_before_discriminated_union_declaration = false
+fsharp_multi_line_lambda_closing_newline         = true
+fsharp_blank_lines_around_nested_multiline_expressions = true
+fsharp_bar_before_discriminated_union_declaration = true
 fsharp_keep_max_number_of_blank_lines            = 1
-fsharp_newline_before_multiline_computation_expression = false
+fsharp_newline_before_multiline_computation_expression = true
 
 # --- Experimental Options ------------------------------------------------------
 fsharp_experimental_keep_indent_in_branch        = true
-fsharp_experimental_elmish                       = false
+fsharp_experimental_elmish                       = true
 
 # ===========================| F# Signature Files |==============================
 [*.fsi]

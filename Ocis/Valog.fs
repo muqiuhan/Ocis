@@ -19,11 +19,11 @@ module private ValogPool =
 type IncrementalGCConfig =
   {
     /// Maximum time allowed for a single GC batch (milliseconds)
-    MaxBatchTimeMs: int
+    MaxBatchTimeMs : int
     /// Maximum entries to process in a single batch
-    MaxBatchSize: int
+    MaxBatchSize : int
     /// Progress reporting interval (batches)
-    ProgressInterval: int
+    ProgressInterval : int
   }
 
 /// <summary>
@@ -32,23 +32,23 @@ type IncrementalGCConfig =
 type IncrementalGCState =
   {
     /// Total live locations to process
-    TotalLiveLocations: int
+    TotalLiveLocations : int
     /// Number of locations processed so far
-    ProcessedCount: int
+    ProcessedCount : int
     /// Remapped locations collected so far
-    RemappedLocations: Map<int64, int64>
+    RemappedLocations : Map<int64, int64>
     /// Whether GC is completed
-    IsCompleted: bool
+    IsCompleted : bool
     /// Current position in the Valog file
-    CurrentPosition: int64
+    CurrentPosition : int64
     /// Temporary Valog path for incremental writes
-    TempValogPath: string
+    TempValogPath : string
     /// File streams for incremental processing
-    TempWriter: BinaryWriter option
+    TempWriter : BinaryWriter option
     /// Start time of the current batch
-    BatchStartTime: System.DateTime
+    BatchStartTime : System.DateTime
     /// New field to hold the new Valog instance
-    NewValog: Valog option
+    NewValog : Valog option
   }
 
 /// <summary>
@@ -63,29 +63,29 @@ type IncrementalGCState =
 /// </remarks>
 and Valog
   (
-    path: string,
-    fileStream: FileStream,
-    reader: BinaryReader,
-    writer: BinaryWriter,
-    head: int64,
-    tail: int64
+    path : string,
+    fileStream : FileStream,
+    reader : BinaryReader,
+    writer : BinaryWriter,
+    head : int64,
+    tail : int64
   )
   =
 
-  let path: string = path
+  let path : string = path
   /// The file stream for direct file operations. FileStream internally handles file pointers and buffers.
-  let mutable fileStream: FileStream = fileStream
-  let mutable reader: BinaryReader = reader
-  let mutable writer: BinaryWriter = writer
+  let mutable fileStream : FileStream = fileStream
+  let mutable reader : BinaryReader = reader
+  let mutable writer : BinaryWriter = writer
   /// The next writable position, also represents the logical end of the file.
-  let mutable head: int64 = head
+  let mutable head : int64 = head
   /// The position of the oldest valid value (for garbage collection). Data before this position is considered garbage.
-  let mutable tail: int64 = tail
-  let threadOwner = ThreadOwner.CaptureOwnerThread()
+  let mutable tail : int64 = tail
+  let threadOwner = ThreadOwner.CaptureOwnerThread ()
 
   // Valog is thread-affine; caller must execute all reads/writes on owner thread.
-  member _.BindToCurrentThread() =
-    threadOwner.RebindOwnerThread("Valog.BindToCurrentThread")
+  member _.BindToCurrentThread () =
+    threadOwner.RebindOwnerThread ("Valog.BindToCurrentThread")
 
   member _.Path = path
   member _.FileStream = fileStream
@@ -99,10 +99,10 @@ and Valog
     and set value = tail <- value
 
   interface IDisposable with
-    member _.Dispose() =
-      writer.Dispose()
-      reader.Dispose()
-      fileStream.Dispose()
+    member _.Dispose () =
+      writer.Dispose ()
+      reader.Dispose ()
+      fileStream.Dispose ()
 
   /// <summary>
   /// Waits for a file to become available for read/write operations.
@@ -112,36 +112,38 @@ and Valog
   /// <param name="maxAttempts">Maximum number of attempts to check file availability.</param>
   /// <returns>Async Result indicating success or failure.</returns>
   static member private WaitForFileAvailable
-    (path: string, maxAttempts: int)
+    (path : string, maxAttempts : int)
     : Async<Result<unit, string>>
     =
-    let rec waitForFile attempts = async {
-      if attempts >= maxAttempts then
-        return
-          Error $"File {path} still not available after {maxAttempts} attempts"
-      else
-        try
-          // Try to open the file with exclusive access to verify it's available
-          use testStream =
-            new FileStream(
-              path,
-              FileMode.Open,
-              FileAccess.ReadWrite,
-              FileShare.None
-            )
+    let rec waitForFile attempts =
+      async {
+        if attempts >= maxAttempts then
+          return
+            Error
+              $"File {path} still not available after {maxAttempts} attempts"
+        else
+          try
+            // Try to open the file with exclusive access to verify it's available
+            use testStream =
+              new FileStream (
+                path,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None
+              )
 
-          if testStream.CanRead && testStream.CanWrite then
-            return Ok()
-          else
+            if testStream.CanRead && testStream.CanWrite then
+              return Ok ()
+            else
+              do! Async.Sleep 50
+              return! waitForFile (attempts + 1)
+          with
+          | :? IOException ->
+            // File is still locked, wait and retry
             do! Async.Sleep 50
-            return! waitForFile(attempts + 1)
-        with
-        | :? IOException ->
-          // File is still locked, wait and retry
-          do! Async.Sleep 50
-          return! waitForFile(attempts + 1)
-        | ex -> return Error $"Error checking file availability: {ex.Message}"
-    }
+            return! waitForFile (attempts + 1)
+          | ex -> return Error $"Error checking file availability: {ex.Message}"
+      }
 
     waitForFile 0
 
@@ -151,17 +153,17 @@ and Valog
   /// </summary>
   /// <param name="path">The path of the Valog file.</param>
   /// <returns>True if recovery was performed, false otherwise.</returns>
-  static member private TryRecoverFromCrash(path: string) : bool =
+  static member private TryRecoverFromCrash (path : string) : bool =
     try
       let tempPath = path + ".temp"
 
       if File.Exists tempPath then
-        if not(File.Exists path) then
+        if not (File.Exists path) then
           // Main file is missing but temp file exists - this indicates a crash during GC
           Logger.Warn
             $"Detected incomplete GC: temp file exists but main file missing. Attempting recovery..."
 
-          File.Move(tempPath, path)
+          File.Move (tempPath, path)
           Logger.Info $"Recovered Valog from temp file: {path}"
           true
         else
@@ -182,17 +184,17 @@ and Valog
   /// </summary>
   /// <param name="path">The path of the Value Log file.</param>
   /// <returns>A Result type: if successful, returns Ok Valog instance, otherwise returns Error string.</returns>
-  static member Create(path: string) : Result<Valog, string> =
-    let mutable fileStream: FileStream = null
-    let mutable reader: BinaryReader = null
-    let mutable writer: BinaryWriter = null
+  static member Create (path : string) : Result<Valog, string> =
+    let mutable fileStream : FileStream = null
+    let mutable reader : BinaryReader = null
+    let mutable writer : BinaryWriter = null
 
     try
       // Attempt to recover from crashed GC operations
       Valog.TryRecoverFromCrash path |> ignore
 
       fileStream <-
-        new FileStream(
+        new FileStream (
           path,
           FileMode.OpenOrCreate,
           FileAccess.ReadWrite,
@@ -205,18 +207,18 @@ and Valog
       // Initialize Tail to 0. The update of Tail is responsible for garbage collection (usually part of the Compaction process).
       let tail = 0L
 
-      reader <- new BinaryReader(fileStream, System.Text.Encoding.UTF8, true)
+      reader <- new BinaryReader (fileStream, System.Text.Encoding.UTF8, true)
 
-      writer <- new BinaryWriter(fileStream, System.Text.Encoding.UTF8, true)
+      writer <- new BinaryWriter (fileStream, System.Text.Encoding.UTF8, true)
 
-      Ok(new Valog(path, fileStream, reader, writer, head, tail))
+      Ok (new Valog (path, fileStream, reader, writer, head, tail))
     with ex ->
       // Dispose any partially created resources to avoid handle leaks
       match writer with
       | null -> ()
       | w ->
         try
-          w.Dispose()
+          w.Dispose ()
         with e ->
           Logger.Warn $"Failed to dispose writer: {e.Message}"
 
@@ -224,7 +226,7 @@ and Valog
       | null -> ()
       | r ->
         try
-          r.Dispose()
+          r.Dispose ()
         with e ->
           Logger.Warn $"Failed to dispose reader: {e.Message}"
 
@@ -232,7 +234,7 @@ and Valog
       | null -> ()
       | fs ->
         try
-          fs.Dispose()
+          fs.Dispose ()
         with e ->
           Logger.Warn $"Failed to dispose file stream: {e.Message}"
 
@@ -246,15 +248,15 @@ and Valog
   /// <param name="key">The key associated with the value (for integrity check).</param>
   /// <param name="value">The value to append.</param>
   /// <returns>The ValueLocation (offset) of the entry written.</returns>
-  member _.Append(key: byte array, value: byte array) : int64 =
-    threadOwner.AssertOwnerThread("Valog.Append")
+  member _.Append (key : byte array, value : byte array) : int64 =
+    threadOwner.AssertOwnerThread ("Valog.Append")
 
     // Single-threaded implementation optimized for performance.
     // Record the offset at which this new entry will start, which will be returned as ValueLocation.
     let entryStartOffset = head
 
     // Move the file stream pointer to the current Head position, preparing to append data.
-    fileStream.Seek(head, SeekOrigin.Begin) |> ignore
+    fileStream.Seek (head, SeekOrigin.Begin) |> ignore
 
     // Use BinaryWriter to write data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryWriter is disposed.
     writer.Write key.Length
@@ -272,8 +274,8 @@ and Valog
   /// </summary>
   /// <param name="location">The ValueLocation (offset) to read.</param>
   /// <returns>An Option type: if found and valid, returns Some (key, value), otherwise returns None.</returns>
-  member _.Read(location: int64) : (byte array * byte array) option =
-    threadOwner.AssertOwnerThread("Valog.Read")
+  member _.Read (location : int64) : (byte array * byte array) option =
+    threadOwner.AssertOwnerThread ("Valog.Read")
 
     // Single-threaded implementation optimized for performance.
     // Basic range check: ensure the position is within the valid range of the Value Log
@@ -283,7 +285,7 @@ and Valog
     else
       try
         // Move the file stream pointer to the specified position.
-        fileStream.Seek(location, SeekOrigin.Begin)
+        fileStream.Seek (location, SeekOrigin.Begin)
         |> ignore
 
         // Read key length and key
@@ -293,7 +295,7 @@ and Valog
           Serialization.readLengthAndValidate
             reader
             "valog key"
-            (Some(totalRemaining - 4L))
+            (Some (totalRemaining - 4L))
 
         let key =
           if keyLength <= 1024 then
@@ -304,7 +306,8 @@ and Valog
               let mutable totalRead = 0
 
               while totalRead < keyLength do
-                let read = reader.Read(rented, totalRead, keyLength - totalRead)
+                let read =
+                  reader.Read (rented, totalRead, keyLength - totalRead)
 
                 if read = 0 then
                   failwith
@@ -313,7 +316,7 @@ and Valog
                 totalRead <- totalRead + read
 
               let result = Array.zeroCreate<byte> keyLength
-              System.Array.Copy(rented, 0, result, 0, keyLength)
+              System.Array.Copy (rented, 0, result, 0, keyLength)
               result
             finally
               ValogPool.byteArrayPool.Return rented
@@ -327,7 +330,7 @@ and Valog
           Serialization.readLengthAndValidate
             reader
             "valog value"
-            (Some(remainingAfterKey - 4L))
+            (Some (remainingAfterKey - 4L))
 
         let value =
           if valueLength <= 1024 then
@@ -339,7 +342,7 @@ and Valog
 
               while totalRead < valueLength do
                 let read =
-                  reader.Read(rented, totalRead, valueLength - totalRead)
+                  reader.Read (rented, totalRead, valueLength - totalRead)
 
                 if read = 0 then
                   failwith
@@ -348,14 +351,14 @@ and Valog
                 totalRead <- totalRead + read
 
               let result = Array.zeroCreate<byte> valueLength
-              System.Array.Copy(rented, 0, result, 0, valueLength)
+              System.Array.Copy (rented, 0, result, 0, valueLength)
               result
             finally
               ValogPool.byteArrayPool.Return rented
           else
             reader.ReadBytes valueLength
 
-        Some(key, value) // Return the read key-value pair.
+        Some (key, value) // Return the read key-value pair.
       with
       | :? EndOfStreamException ->
         // If the file is corrupted or the given position points to an incomplete entry (e.g., due to a crash), this may happen.
@@ -377,8 +380,8 @@ and Valog
   /// </summary>
   /// <param name="location">The ValueLocation (offset) to read.</param>
   /// <returns>An Option type: if found and valid, returns Some value, otherwise returns None.</returns>
-  member _.ReadValueOnly(location: int64) : byte array option =
-    threadOwner.AssertOwnerThread("Valog.ReadValueOnly")
+  member _.ReadValueOnly (location : int64) : byte array option =
+    threadOwner.AssertOwnerThread ("Valog.ReadValueOnly")
 
     // Basic range check: ensure the position is within the valid range of the Value Log
     // (after Tail and before Head).
@@ -388,7 +391,7 @@ and Valog
       try
         // Move the file stream pointer to the specified position.
         // Use the same Seek method as Read for consistency
-        fileStream.Seek(location, SeekOrigin.Begin)
+        fileStream.Seek (location, SeekOrigin.Begin)
         |> ignore
 
         // Skip key: read key length and skip key bytes
@@ -401,7 +404,7 @@ and Valog
           Serialization.readLengthAndValidate
             reader
             "valog key"
-            (Some(totalRemaining - 4L))
+            (Some (totalRemaining - 4L))
 
         if keyLength > 0 then
           if keyLength <= 1024 then
@@ -414,7 +417,7 @@ and Valog
 
               while remaining > 0 do
                 let toRead = min remaining 1024
-                let read = reader.Read(buffer, 0, toRead)
+                let read = reader.Read (buffer, 0, toRead)
 
                 if read = 0 then
                   failwith
@@ -436,7 +439,7 @@ and Valog
           Serialization.readLengthAndValidate
             reader
             "valog value"
-            (Some(remainingAfterKey - 4L))
+            (Some (remainingAfterKey - 4L))
 
         let value =
           if valueLength <= 1024 then
@@ -448,7 +451,7 @@ and Valog
 
               while totalRead < valueLength do
                 let read =
-                  reader.Read(rented, totalRead, valueLength - totalRead)
+                  reader.Read (rented, totalRead, valueLength - totalRead)
 
                 if read = 0 then
                   failwith
@@ -457,7 +460,7 @@ and Valog
                 totalRead <- totalRead + read
 
               let result = Array.zeroCreate<byte> valueLength
-              System.Array.Copy(rented, 0, result, 0, valueLength)
+              System.Array.Copy (rented, 0, result, 0, valueLength)
               result
             finally
               ValogPool.byteArrayPool.Return rented
@@ -484,16 +487,16 @@ and Valog
   /// Force any buffered write data to be written to the underlying file, and then to the device.
   /// This is crucial for data persistence.
   /// </summary>
-  member _.Flush() : unit =
+  member _.Flush () : unit =
     // Value log flush does not force fsync by default; durability guarantees
     // are coordinated through WAL and commit policy.
-    fileStream.Flush()
+    fileStream.Flush ()
 
   /// <summary>
   /// Close the Value Log file stream.
   /// It is recommended to use the 'use' keyword with the Valog type, as it implements IDisposable.
   /// </summary>
-  member _.Close() : unit = fileStream.Close()
+  member _.Close () : unit = fileStream.Close ()
 
   /// <summary>
   /// Explicitly dispose the Value Log.
@@ -503,7 +506,7 @@ and Valog
   /// It is recommended to use the 'use' keyword with the Valog type, as it implements IDisposable.
   /// </remarks>
   [<Obsolete "This function should not be called directly.">]
-  member inline this.Dispose() = (this :> IDisposable).Dispose()
+  member inline this.Dispose () = (this :> IDisposable).Dispose ()
 
   /// <summary>
   /// Performs incremental garbage collection on the Value Log to avoid long pauses.
@@ -529,7 +532,7 @@ and Valog
   /// <param name="config">Configuration for incremental GC behavior</param>
   /// <returns>Async operation that yields GC state after each batch</returns>
   static member CollectGarbageIncremental
-    (valog: Valog, liveLocations: Set<int64>, config: IncrementalGCConfig)
+    (valog : Valog, liveLocations : Set<int64>, config : IncrementalGCConfig)
     : Async<Result<IncrementalGCState * Valog option, string>>
     =
     async {
@@ -538,19 +541,19 @@ and Valog
         let tempValogPath = valog.Path + ".temp"
 
         let initialState =
-          {TotalLiveLocations = liveLocations.Count
-           ProcessedCount = 0
-           RemappedLocations = Map.empty<int64, int64>
-           IsCompleted = false
-           CurrentPosition = 0L
-           TempValogPath = tempValogPath
-           TempWriter = None
-           BatchStartTime = System.DateTime.UtcNow
-           NewValog = None}
+          { TotalLiveLocations = liveLocations.Count
+            ProcessedCount = 0
+            RemappedLocations = Map.empty<int64, int64>
+            IsCompleted = false
+            CurrentPosition = 0L
+            TempValogPath = tempValogPath
+            TempWriter = None
+            BatchStartTime = System.DateTime.UtcNow
+            NewValog = None }
 
         // Initialize temporary file and writer
         use tempFileStream =
-          new FileStream(
+          new FileStream (
             tempValogPath,
             FileMode.Create,
             FileAccess.Write,
@@ -558,15 +561,15 @@ and Valog
           )
 
         use tempWriter =
-          new BinaryWriter(tempFileStream, System.Text.Encoding.UTF8, false)
+          new BinaryWriter (tempFileStream, System.Text.Encoding.UTF8, false)
 
         let stateWithWriter =
-          {initialState with
-              TempWriter = Some tempWriter}
+          { initialState with
+              TempWriter = Some tempWriter }
 
         // Read and process the original Valog file in batches
         use oldFileStream =
-          new FileStream(
+          new FileStream (
             valog.Path,
             FileMode.Open,
             FileAccess.Read,
@@ -574,10 +577,10 @@ and Valog
           )
 
         use oldReader =
-          new BinaryReader(oldFileStream, System.Text.Encoding.UTF8, true)
+          new BinaryReader (oldFileStream, System.Text.Encoding.UTF8, true)
 
         let finalState =
-          Valog.ProcessGCBatch(
+          Valog.ProcessGCBatch (
             stateWithWriter,
             oldReader,
             liveLocations,
@@ -586,20 +589,20 @@ and Valog
 
         if finalState.IsCompleted then
           // Ensure all data is written to disk before replacing
-          tempWriter.Flush()
-          tempFileStream.Flush(true) // Force fsync to ensure data is on disk
+          tempWriter.Flush ()
+          tempFileStream.Flush (true) // Force fsync to ensure data is on disk
 
           // Explicitly close all file handles before atomic replacement
-          tempWriter.Dispose()
-          tempFileStream.Dispose()
-          oldReader.Dispose()
-          oldFileStream.Dispose()
+          tempWriter.Dispose ()
+          tempFileStream.Dispose ()
+          oldReader.Dispose ()
+          oldFileStream.Dispose ()
 
           // Atomically replace the old Valog with the new one using File.Replace
           // File.Replace is more atomic than Delete + Move, and handles edge cases better
           try
             if File.Exists valog.Path then
-              File.Replace(
+              File.Replace (
                 sourceFileName = tempValogPath,
                 destinationFileName = valog.Path,
                 destinationBackupFileName = null, // No backup needed
@@ -607,15 +610,15 @@ and Valog
               )
             else
               // If destination doesn't exist, File.Replace will fail, so use Move instead
-              File.Move(tempValogPath, valog.Path)
+              File.Move (tempValogPath, valog.Path)
 
             Logger.Debug "Valog file atomically replaced after GC"
 
             // Wait for file handles to be released by the OS (with retry logic)
-            let! fileAvailable = Valog.WaitForFileAvailable(valog.Path, 10)
+            let! fileAvailable = Valog.WaitForFileAvailable (valog.Path, 10)
 
             match fileAvailable with
-            | Ok() ->
+            | Ok () ->
               // Reopen Valog instance
               match Valog.Create valog.Path with
               | Ok newValog ->
@@ -623,15 +626,16 @@ and Valog
                   $"Incremental Valog GC completed: processed {finalState.ProcessedCount} live locations"
 
                 return
-                  Ok(
-                    {finalState with
+                  Ok (
+                    { finalState with
                         TempWriter = None
-                        NewValog = Some newValog},
+                        NewValog = Some newValog },
                     Some newValog
                   )
               | Error msg ->
                 Logger.Error
                   $"Failed to reopen Valog after incremental GC: {msg}"
+
                 return Error $"Failed to reopen Valog: {msg}"
             | Error msg ->
               Logger.Error $"File not available after GC replacement: {msg}"
@@ -650,7 +654,7 @@ and Valog
           Logger.Debug
             $"Incremental GC batch completed: {finalState.ProcessedCount}/{finalState.TotalLiveLocations} locations processed"
 
-          return Ok(finalState, None)
+          return Ok (finalState, None)
 
       with ex ->
         Logger.Error $"Incremental GC error: {ex.Message}"
@@ -669,10 +673,10 @@ and Valog
   /// </summary>
   static member private ProcessGCBatch
     (
-      state: IncrementalGCState,
-      oldReader: BinaryReader,
-      liveLocations: Set<int64>,
-      config: IncrementalGCConfig
+      state : IncrementalGCState,
+      oldReader : BinaryReader,
+      liveLocations : Set<int64>,
+      config : IncrementalGCConfig
     )
     : IncrementalGCState
     =
@@ -681,7 +685,7 @@ and Valog
     let mutable entriesInBatch = 0
 
     // Continue processing from where we left off
-    oldReader.BaseStream.Seek(currentState.CurrentPosition, SeekOrigin.Begin)
+    oldReader.BaseStream.Seek (currentState.CurrentPosition, SeekOrigin.Begin)
     |> ignore
 
     while not currentState.IsCompleted
@@ -701,7 +705,7 @@ and Valog
           Serialization.readLengthAndValidate
             oldReader
             "valog key (GC batch)"
-            (Some(remainingTotal - 4L))
+            (Some (remainingTotal - 4L))
 
         let key = oldReader.ReadBytes keyLength
         let remainingAfterKey = remainingTotal - 4L - int64 keyLength
@@ -710,7 +714,7 @@ and Valog
           Serialization.readLengthAndValidate
             oldReader
             "valog value (GC batch)"
-            (Some(remainingAfterKey - 4L))
+            (Some (remainingAfterKey - 4L))
 
         let value = oldReader.ReadBytes valueLength
 
@@ -728,26 +732,26 @@ and Valog
 
             // Record the remapping
             let newRemapped =
-              currentState.RemappedLocations.Add(originalOffset, newOffset)
+              currentState.RemappedLocations.Add (originalOffset, newOffset)
 
             currentState <-
-              {currentState with
-                  RemappedLocations = newRemapped}
+              { currentState with
+                  RemappedLocations = newRemapped }
 
           | None ->
             Logger.Warn "TempWriter not available during incremental GC batch"
 
         currentState <-
-          {currentState with
+          { currentState with
               ProcessedCount = currentState.ProcessedCount + 1
-              CurrentPosition = oldReader.BaseStream.Position}
+              CurrentPosition = oldReader.BaseStream.Position }
 
         entriesInBatch <- entriesInBatch + 1
 
       with
       | :? EndOfStreamException ->
         // Reached end of file
-        currentState <- {currentState with IsCompleted = true}
+        currentState <- { currentState with IsCompleted = true }
       | ex ->
         Logger.Error
           $"Error processing GC batch at position {currentState.CurrentPosition}: {ex.Message}"
@@ -758,7 +762,7 @@ and Valog
       oldReader.BaseStream.Position
       >= oldReader.BaseStream.Length
     then
-      currentState <- {currentState with IsCompleted = true}
+      currentState <- { currentState with IsCompleted = true }
 
     currentState
 
@@ -767,7 +771,7 @@ and Valog
   /// Now delegates to incremental GC for consistency.
   /// </summary>
   static member CollectGarbage
-    (valog: Valog, liveLocations: Set<int64>)
+    (valog : Valog, liveLocations : Set<int64>)
     : Async<Result<Valog * Map<int64, int64>, string>>
     =
     async {
@@ -776,22 +780,23 @@ and Valog
 
       // Use incremental GC with aggressive batch settings for synchronous behavior
       let config =
-        {MaxBatchTimeMs = System.Int32.MaxValue // No time limit
-         MaxBatchSize = System.Int32.MaxValue // No size limit
-         ProgressInterval = 1 // Report progress every batch
+        { MaxBatchTimeMs = System.Int32.MaxValue // No time limit
+          MaxBatchSize = System.Int32.MaxValue // No size limit
+          ProgressInterval = 1 // Report progress every batch
         }
 
       let! result =
-        Valog.CollectGarbageIncremental(valog, liveLocations, config)
+        Valog.CollectGarbageIncremental (valog, liveLocations, config)
 
       match result with
-      | Ok(state, Some newValog) when state.IsCompleted ->
+      | Ok (state, Some newValog) when state.IsCompleted ->
         Logger.Info "Legacy Valog GC completed successfully"
-        return Ok(newValog, state.RemappedLocations)
-      | Ok(state, None) when not state.IsCompleted ->
+        return Ok (newValog, state.RemappedLocations)
+      | Ok (state, None) when not state.IsCompleted ->
         // This should not happen in legacy mode with unlimited batch settings
         Logger.Warn
           "Incremental GC did not complete in single batch (legacy mode)"
+
         return Error "GC did not complete as expected"
       | Error msg ->
         Logger.Error $"Legacy GC failed: {msg}"
@@ -800,6 +805,7 @@ and Valog
         // Catch-all for any other unexpected cases
         Logger.Error
           "Unexpected result from CollectGarbageIncremental in legacy GC mode"
+
         return Error "Unexpected GC result"
     }
 
@@ -807,13 +813,13 @@ and Valog
   /// Helper function to copy live data to a new Valog file and re-map locations.
   /// </summary>
   static member CopyLiveData
-    (oldPath: string, newPath: string, liveLocations: Set<int64>)
+    (oldPath : string, newPath : string, liveLocations : Set<int64>)
     : Async<Result<Map<int64, int64>, string>>
     =
     async {
       try
         use newFileStream =
-          new FileStream(
+          new FileStream (
             newPath,
             FileMode.Create,
             FileAccess.Write,
@@ -821,10 +827,10 @@ and Valog
           )
 
         use newWriter =
-          new BinaryWriter(newFileStream, System.Text.Encoding.UTF8, false)
+          new BinaryWriter (newFileStream, System.Text.Encoding.UTF8, false)
 
         use oldFileStream =
-          new FileStream(
+          new FileStream (
             oldPath,
             FileMode.Open,
             FileAccess.Read,
@@ -832,10 +838,10 @@ and Valog
           )
 
         use oldReader =
-          new BinaryReader(oldFileStream, System.Text.Encoding.UTF8, true)
+          new BinaryReader (oldFileStream, System.Text.Encoding.UTF8, true)
 
         // Recursive function to copy entries functionally
-        let rec copyEntries(remapped: Map<int64, int64>) =
+        let rec copyEntries (remapped : Map<int64, int64>) =
           if oldFileStream.Position >= oldFileStream.Length then
             remapped
           else
@@ -846,7 +852,7 @@ and Valog
               Serialization.readLengthAndValidate
                 oldReader
                 "valog key (copy live data)"
-                (Some(remainingTotal - 4L))
+                (Some (remainingTotal - 4L))
 
             let key = oldReader.ReadBytes keyLength
 
@@ -856,7 +862,7 @@ and Valog
               Serialization.readLengthAndValidate
                 oldReader
                 "valog value (copy live data)"
-                (Some(remainingAfterKey - 4L))
+                (Some (remainingAfterKey - 4L))
 
             let value = oldReader.ReadBytes valueLength
 
@@ -868,7 +874,7 @@ and Valog
               newWriter.Write valueLength
               newWriter.Write value
 
-              copyEntries(remapped.Add(originalOffset, newOffset))
+              copyEntries (remapped.Add (originalOffset, newOffset))
             else
               copyEntries remapped
 

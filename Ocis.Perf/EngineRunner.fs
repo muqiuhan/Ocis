@@ -9,7 +9,7 @@ open System.Threading.Tasks
 open Ocis.OcisDB
 
 module EngineRunner =
-  let private createPayload(size: int) =
+  let private createPayload (size : int) =
     let bytes = Array.create size (byte 'x')
 
     if size > 0 then
@@ -18,13 +18,13 @@ module EngineRunner =
     bytes
 
   let private makeKeys count =
-    Array.init count (fun i -> Encoding.UTF8.GetBytes($"perf-key-{i:D8}"))
+    Array.init count (fun i -> Encoding.UTF8.GetBytes ($"perf-key-{i:D8}"))
 
   let private preloadForReads
-    (db: OcisDB)
-    (keys: byte array array)
-    (value: byte array)
-    (config: BenchmarkConfig)
+    (db : OcisDB)
+    (keys : byte array array)
+    (value : byte array)
+    (config : BenchmarkConfig)
     =
     if config.SkipPreload then
       printfn "Skipping preload as requested"
@@ -38,38 +38,38 @@ module EngineRunner =
       printfn "Preloading %d keys..." count
 
       for i in 0 .. count - 1 do
-        db.Set(keys[i], value) |> ignore
+        db.Set (keys[i], value) |> ignore
 
-  let private clearCache() =
+  let private clearCache () =
     if System.Environment.OSVersion.Platform = System.PlatformID.Unix then
       try
-        System.IO.File.WriteAllText("/proc/sys/vm/drop_caches", "3")
+        System.IO.File.WriteAllText ("/proc/sys/vm/drop_caches", "3")
         printfn "OS page cache cleared"
       with ex ->
         printfn "Warning: failed to clear cache (may need sudo): %s" ex.Message
     else
       printfn "Warning: cache clear only supported on Linux"
 
-  let run(config: BenchmarkConfig) : RunSummary =
+  let run (config : BenchmarkConfig) : RunSummary =
     let keys = makeKeys config.KeyCount
     let payload = createPayload config.ValueBytes
 
     if
       config.ColdStart
-      && System.IO.Directory.Exists(config.DataDir)
+      && System.IO.Directory.Exists (config.DataDir)
     then
       printfn "ColdStart: removing existing data directory..."
-      System.IO.Directory.Delete(config.DataDir, true)
+      System.IO.Directory.Delete (config.DataDir, true)
 
     if config.ClearCacheBeforeRun then
-      clearCache()
+      clearCache ()
 
-    System.IO.Directory.CreateDirectory(config.DataDir)
+    System.IO.Directory.CreateDirectory (config.DataDir)
     |> ignore
 
     use db =
       match
-        OcisDB.Open(
+        OcisDB.Open (
           config.DataDir,
           config.FlushThreshold,
           durabilityMode = config.DurabilityMode,
@@ -89,19 +89,22 @@ module EngineRunner =
     let mutable successCount = 0L
     let mutable failureCount = 0L
     let indexCounter = ref 0
-    let latencies = ConcurrentQueue<float>()
+    let latencies = ConcurrentQueue<float> ()
 
-    let swGlobal = Stopwatch.StartNew()
+    let swGlobal = Stopwatch.StartNew ()
+
     let endAt =
       swGlobal.Elapsed
-      + TimeSpan.FromSeconds(float config.DurationSeconds)
+      + TimeSpan.FromSeconds (float config.DurationSeconds)
 
     // Each worker loops until duration expires and records per-op latency.
-    let runWorker(rng: Random) =
+    let runWorker (rng : Random) =
       while swGlobal.Elapsed < endAt do
-        let keyIndex = Interlocked.Increment(indexCounter) % keys.Length
+        let keyIndex =
+          Interlocked.Increment (indexCounter) % keys.Length
+
         let key = keys[keyIndex]
-        let opStart = Stopwatch.GetTimestamp()
+        let opStart = Stopwatch.GetTimestamp ()
 
         let ok =
           match config.Operation with
@@ -109,30 +112,31 @@ module EngineRunner =
           | OperationMode.Get -> db.Get(key).IsOk
           | OperationMode.Mixed ->
             // Mixed mode approximates read-heavy workloads.
-            if rng.NextDouble() < 0.7 then
+            if rng.NextDouble () < 0.7 then
               db.Get(key).IsOk
             else
               db.Set(key, payload).IsOk
 
         let elapsedMs =
           Stopwatch.GetElapsedTime(opStart).TotalMilliseconds
+
         latencies.Enqueue elapsedMs
 
         if ok then
-          Interlocked.Increment(&successCount) |> ignore
+          Interlocked.Increment (&successCount) |> ignore
         else
-          Interlocked.Increment(&failureCount) |> ignore
+          Interlocked.Increment (&failureCount) |> ignore
 
     if config.Workers = 1 then
-      runWorker(Random(1000))
+      runWorker (Random (1000))
     else
       let workers =
-        [|for workerId in 0 .. config.Workers - 1 do
-            Task.Run(fun () -> runWorker(Random(1000 + workerId))) |]
+        [| for workerId in 0 .. config.Workers - 1 do
+             Task.Run (fun () -> runWorker (Random (1000 + workerId))) |]
 
       Task.WaitAll workers
 
-    swGlobal.Stop()
+    swGlobal.Stop ()
 
     let opName =
       match config.Operation with

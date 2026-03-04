@@ -4,16 +4,17 @@ open System
 open System.Globalization
 open System.IO
 
-let private toMap(args: string array) =
+let private toMap (args : string array) =
   // Expect CLI options as '--name value' pairs.
   args
   |> Array.skip 1
   |> Array.chunkBySize 2
-  |> Array.choose(fun pair ->
-    if pair.Length = 2 && pair[0].StartsWith("--") then
-      Some(pair[0], pair[1])
+  |> Array.choose (fun pair ->
+    if pair.Length = 2 && pair[0].StartsWith ("--") then
+      Some (pair[0], pair[1])
     else
-      None)
+      None
+  )
   |> Map.ofArray
 
 let private getOrDefault map key fallback =
@@ -21,29 +22,29 @@ let private getOrDefault map key fallback =
   | Some value -> value
   | None -> fallback
 
-let private parseInt(value: string) =
-  Int32.Parse(value, CultureInfo.InvariantCulture)
+let private parseInt (value : string) =
+  Int32.Parse (value, CultureInfo.InvariantCulture)
 
-let private parseBool (optionName: string) (value: string) =
-  match value.ToLowerInvariant() with
+let private parseBool (optionName : string) (value : string) =
+  match value.ToLowerInvariant () with
   | "true" -> true
   | "false" -> false
   | _ -> failwith $"{optionName} must be true or false"
 
-let private parseTarget(raw: string) =
-  match raw.ToLowerInvariant() with
+let private parseTarget (raw : string) =
+  match raw.ToLowerInvariant () with
   | "engine" -> Engine
   | "server" -> Server
   | _ -> failwith "First argument must be 'engine' or 'server'"
 
-let private parseOperation(raw: string) =
-  match raw.ToLowerInvariant() with
+let private parseOperation (raw : string) =
+  match raw.ToLowerInvariant () with
   | "set" -> OperationMode.Set
   | "get" -> OperationMode.Get
   | "mixed" -> OperationMode.Mixed
   | _ -> failwith "--ops must be one of: set|get|mixed"
 
-let private buildConfig(args: string array) =
+let private buildConfig (args : string array) =
   if args.Length = 0 then
     failwith
       "Usage: dotnet run --project Ocis.Perf -- <engine|server> [--key value ...]"
@@ -51,43 +52,45 @@ let private buildConfig(args: string array) =
   let kv = toMap args
   let target = parseTarget args[0]
   let workersDefault = if target = Engine then "1" else "8"
+
   let dataDirDefault =
-    Path.Combine("BenchmarkDotNet.Artifacts", "throughput-data")
+    Path.Combine ("BenchmarkDotNet.Artifacts", "throughput-data")
 
   let outputDirDefault =
-    Path.Combine("BenchmarkDotNet.Artifacts", "results", "throughput")
+    Path.Combine ("BenchmarkDotNet.Artifacts", "results", "throughput")
 
-  {Target = target
-   Operation = parseOperation(getOrDefault kv "--ops" "mixed")
-   DurationSeconds = parseInt(getOrDefault kv "--duration-sec" "30")
-   WarmupSeconds = parseInt(getOrDefault kv "--warmup-sec" "5")
-   RepeatCount = parseInt(getOrDefault kv "--repeat" "3")
-   Workers = parseInt(getOrDefault kv "--workers" workersDefault)
-   AllowUnsafeEngineConcurrency =
+  { Target = target
+    Operation = parseOperation (getOrDefault kv "--ops" "mixed")
+    DurationSeconds = parseInt (getOrDefault kv "--duration-sec" "30")
+    WarmupSeconds = parseInt (getOrDefault kv "--warmup-sec" "5")
+    RepeatCount = parseInt (getOrDefault kv "--repeat" "3")
+    Workers = parseInt (getOrDefault kv "--workers" workersDefault)
+    AllowUnsafeEngineConcurrency =
       parseBool
         "--allow-unsafe-engine-concurrency"
         (getOrDefault kv "--allow-unsafe-engine-concurrency" "false")
-   KeyCount = parseInt(getOrDefault kv "--key-count" "50000")
-   ValueBytes = parseInt(getOrDefault kv "--value-bytes" "256")
-   DataDir = getOrDefault kv "--data-dir" dataDirDefault
-   Host = getOrDefault kv "--host" "127.0.0.1"
-   Port = parseInt(getOrDefault kv "--port" "7379")
-   FlushThreshold = parseInt(getOrDefault kv "--flush-threshold" "1000")
-   DurabilityMode = getOrDefault kv "--durability-mode" "Balanced"
-   GroupCommitWindowMs =
-      parseInt(getOrDefault kv "--group-commit-window-ms" "1")
-   GroupCommitBatchSize =
-      parseInt(getOrDefault kv "--group-commit-batch-size" "10")
-   ClearCacheBeforeRun =
+    KeyCount = parseInt (getOrDefault kv "--key-count" "50000")
+    ValueBytes = parseInt (getOrDefault kv "--value-bytes" "256")
+    DataDir = getOrDefault kv "--data-dir" dataDirDefault
+    Host = getOrDefault kv "--host" "127.0.0.1"
+    Port = parseInt (getOrDefault kv "--port" "7379")
+    FlushThreshold = parseInt (getOrDefault kv "--flush-threshold" "1000")
+    DurabilityMode = getOrDefault kv "--durability-mode" "Balanced"
+    GroupCommitWindowMs =
+      parseInt (getOrDefault kv "--group-commit-window-ms" "1")
+    GroupCommitBatchSize =
+      parseInt (getOrDefault kv "--group-commit-batch-size" "10")
+    ClearCacheBeforeRun =
       parseBool "--clear-cache" (getOrDefault kv "--clear-cache" "false")
-   ColdStart = parseBool "--cold-start" (getOrDefault kv "--cold-start" "false")
-   PreloadKeyCount = parseInt(getOrDefault kv "--preload-key-count" "0")
-   SkipPreload =
+    ColdStart =
+      parseBool "--cold-start" (getOrDefault kv "--cold-start" "false")
+    PreloadKeyCount = parseInt (getOrDefault kv "--preload-key-count" "0")
+    SkipPreload =
       parseBool "--skip-preload" (getOrDefault kv "--skip-preload" "false")
-   OutputDir = getOrDefault kv "--output-dir" outputDirDefault
-   OutputTag = getOrDefault kv "--tag" "baseline"}
+    OutputDir = getOrDefault kv "--output-dir" outputDirDefault
+    OutputTag = getOrDefault kv "--tag" "baseline" }
 
-let private validateEngineWorkers(config: BenchmarkConfig) =
+let private validateEngineWorkers (config : BenchmarkConfig) =
   // Engine target is intentionally single-threaded by default to honor the
   // storage engine thread-affinity contract.
   if
@@ -115,10 +118,10 @@ let private validateEngineWorkers(config: BenchmarkConfig) =
 
   config
 
-let parseAndValidateConfig(args: string array) =
+let parseAndValidateConfig (args : string array) =
   args |> buildConfig |> validateEngineWorkers
 
-let private runOnce(config: BenchmarkConfig) =
+let private runOnce (config : BenchmarkConfig) =
   match config.Target with
   | Engine -> EngineRunner.run config
   | Server -> ServerRunner.run config
@@ -129,44 +132,46 @@ let main args =
     let config = parseAndValidateConfig args
 
     if config.Target = Engine then
-      if Directory.Exists(config.DataDir) then
-        Directory.Delete(config.DataDir, true)
+      if Directory.Exists (config.DataDir) then
+        Directory.Delete (config.DataDir, true)
 
     if config.WarmupSeconds > 0 then
       // Warmup runs with the same workload shape but does not count toward
       // reported runs, which reduces first-run effects.
       let warmupConfig =
-        {config with
+        { config with
             DurationSeconds = config.WarmupSeconds
-            WarmupSeconds = 0}
+            WarmupSeconds = 0 }
 
       let warmupSummary = runOnce warmupConfig
       printfn "Warmup complete: %.3f ops/s" warmupSummary.ThroughputOpsPerSec
 
     let runResults =
-      [for runIndex in 1 .. config.RepeatCount do
-         let runSummary = runOnce config
+      [ for runIndex in 1 .. config.RepeatCount do
+          let runSummary = runOnce config
 
-         let fileSuffix =
-           if config.RepeatCount > 1 then
-             Some(sprintf "run-%02d" runIndex)
-           else
-             None
+          let fileSuffix =
+            if config.RepeatCount > 1 then
+              Some (sprintf "run-%02d" runIndex)
+            else
+              None
 
-         let jsonPath, csvPath =
-           ReportWriter.writeWithSuffix config runSummary fileSuffix
-         printfn
-           "Run %d/%d throughput(ops/s): %.3f"
-           runIndex
-           config.RepeatCount
-           runSummary.ThroughputOpsPerSec
-         printfn "Run %d JSON: %s" runIndex jsonPath
-         printfn "Run %d CSV: %s" runIndex csvPath
-         runSummary, jsonPath, csvPath ]
+          let jsonPath, csvPath =
+            ReportWriter.writeWithSuffix config runSummary fileSuffix
+
+          printfn
+            "Run %d/%d throughput(ops/s): %.3f"
+            runIndex
+            config.RepeatCount
+            runSummary.ThroughputOpsPerSec
+
+          printfn "Run %d JSON: %s" runIndex jsonPath
+          printfn "Run %d CSV: %s" runIndex csvPath
+          runSummary, jsonPath, csvPath ]
 
     let runSummaries =
       runResults
-      |> List.map(fun (summary, _, _) -> summary)
+      |> List.map (fun (summary, _, _) -> summary)
 
     let aggregate = Aggregation.summarize runSummaries
     let summaryPath = ReportWriter.writeSummary config aggregate

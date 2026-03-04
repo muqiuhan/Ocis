@@ -16,28 +16,28 @@ module internal Serialization =
   /// Validate a length value against configured maximum and optional remaining payload bytes.
   /// remainingPayloadOpt should represent bytes available for the payload *after* consuming the length field itself.
   let internal validateLengthValue
-    (len: int)
-    (remainingPayloadOpt: int64 option)
-    (fieldName: string)
+    (len : int)
+    (remainingPayloadOpt : int64 option)
+    (fieldName : string)
     =
     if len < 0 then
-      raise(
-        InvalidDataException(
+      raise (
+        InvalidDataException (
           $"Serialization error ({fieldName}): negative length {len}"
         )
       )
 
     if len > Limits.MaxEntrySizeBytes then
-      raise(
-        InvalidDataException(
+      raise (
+        InvalidDataException (
           $"Serialization error ({fieldName}): length {len} exceeds max {Limits.MaxEntrySizeBytes}"
         )
       )
 
     match remainingPayloadOpt with
     | Some remaining when remaining >= 0L && int64 len > remaining ->
-      raise(
-        InvalidDataException(
+      raise (
+        InvalidDataException (
           $"Serialization error ({fieldName}): length {len} exceeds remaining bytes {remaining}"
         )
       )
@@ -45,11 +45,11 @@ module internal Serialization =
 
   /// Read an int32 length and validate it using optional remaining payload bytes.
   let internal readLengthAndValidate
-    (reader: BinaryReader)
-    (fieldName: string)
-    (remainingPayloadOpt: int64 option)
+    (reader : BinaryReader)
+    (fieldName : string)
+    (remainingPayloadOpt : int64 option)
     =
-    let len = reader.ReadInt32()
+    let len = reader.ReadInt32 ()
     validateLengthValue len remainingPayloadOpt fieldName
 
   /// <summary>
@@ -57,7 +57,7 @@ module internal Serialization =
   /// </summary>
   /// <param name="writer">The BinaryWriter to write to.</param>
   /// <param name="data">The byte array to write.</param>
-  let inline writeByteArray (writer: BinaryWriter) (data: byte array) =
+  let inline writeByteArray (writer : BinaryWriter) (data : byte array) =
     writer.Write data.Length
     writer.Write data
 
@@ -67,7 +67,7 @@ module internal Serialization =
   /// </summary>
   /// <param name="reader">The BinaryReader to read from.</param>
   /// <returns>The byte array read from the BinaryReader.</returns>
-  let inline readByteArray(reader: BinaryReader) =
+  let inline readByteArray (reader : BinaryReader) =
     let len = readLengthAndValidate reader "byte array" None
 
     if len = 0 then
@@ -81,7 +81,7 @@ module internal Serialization =
         let mutable totalRead = 0
 
         while totalRead < len do
-          let read = reader.Read(rented, totalRead, len - totalRead)
+          let read = reader.Read (rented, totalRead, len - totalRead)
 
           if read = 0 then
             failwith
@@ -91,7 +91,7 @@ module internal Serialization =
 
         // Create a copy of the exact size to return
         let result = Array.zeroCreate<byte> len
-        System.Array.Copy(rented, 0, result, 0, len)
+        System.Array.Copy (rented, 0, result, 0, len)
         result
       finally
         byteArrayPool.Return rented
@@ -101,7 +101,7 @@ module internal Serialization =
       let mutable totalRead = 0
 
       while totalRead < len do
-        let read = reader.Read(result, totalRead, len - totalRead)
+        let read = reader.Read (result, totalRead, len - totalRead)
 
         if read = 0 then
           failwith
@@ -119,8 +119,8 @@ module internal Serialization =
   /// <param name="buffer">The buffer to read into.</param>
   /// <returns>The number of bytes read (should equal len).</returns>
   let inline readByteArrayIntoBuffer
-    (reader: BinaryReader)
-    (buffer: byte array)
+    (reader : BinaryReader)
+    (buffer : byte array)
     =
     let len =
       readLengthAndValidate reader "byte array into buffer" None
@@ -133,7 +133,7 @@ module internal Serialization =
     let mutable totalRead = 0
 
     while totalRead < len do
-      let read = reader.Read(buffer, totalRead, len - totalRead)
+      let read = reader.Read (buffer, totalRead, len - totalRead)
 
       if read = 0 then
         failwith
@@ -150,7 +150,7 @@ module internal Serialization =
   /// </summary>
   /// <param name="reader">The BinaryReader to read from.</param>
   /// <returns>The key byte array (may be from pool, should be used immediately).</returns>
-  let inline readKeyForComparison(reader: BinaryReader) : byte array =
+  let inline readKeyForComparison (reader : BinaryReader) : byte array =
     let len = readLengthAndValidate reader "key for comparison" None
 
     if len = 0 then
@@ -163,7 +163,7 @@ module internal Serialization =
         let mutable totalRead = 0
 
         while totalRead < len do
-          let read = reader.Read(rented, totalRead, len - totalRead)
+          let read = reader.Read (rented, totalRead, len - totalRead)
 
           if read = 0 then
             failwith
@@ -172,7 +172,7 @@ module internal Serialization =
           totalRead <- totalRead + read
         // Create a copy for safety (comparison may hold reference)
         let result = Array.zeroCreate<byte> len
-        System.Array.Copy(rented, 0, result, 0, len)
+        System.Array.Copy (rented, 0, result, 0, len)
         result
       finally
         byteArrayPool.Return rented
@@ -182,7 +182,7 @@ module internal Serialization =
       let mutable totalRead = 0
 
       while totalRead < len do
-        let read = reader.Read(result, totalRead, len - totalRead)
+        let read = reader.Read (result, totalRead, len - totalRead)
 
         if read = 0 then
           failwith
@@ -197,10 +197,10 @@ module internal Serialization =
   /// </summary>
   /// <param name="writer">The BinaryWriter to write to.</param>
   /// <param name="loc">The ValueLocation to write.</returns>
-  let inline writeValueLocation (writer: BinaryWriter) (loc: ValueLocation) =
+  let inline writeValueLocation (writer : BinaryWriter) (loc : ValueLocation) =
     writer.Write loc
 
   /// <summary>
   /// Read a ValueLocation (int64) from a BinaryReader.
   /// </summary>
-  let inline readValueLocation(reader: BinaryReader) = reader.ReadInt64()
+  let inline readValueLocation (reader : BinaryReader) = reader.ReadInt64 ()

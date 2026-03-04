@@ -1,0 +1,23 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Ocis.Client.Tests/Ocis.Client.Tests.fsproj">
+    <BuildType Project="?" />
+    <Platform Project="?" />
+    <Build Project="false" />
+  </Project>
+  <Project Path="Ocis.Client/Ocis.Client.fsproj">
+    <BuildType Project="?" />
+    <Platform Project="?" />
+    <Build Project="false" />
+  </Project>
+  <Project Path="Ocis.Perf.Tests/Ocis.Perf.Tests.fsproj" />
+  <Project Path="Ocis.Perf/Ocis.Perf.fsproj" />
+  <Project Path="Ocis.Server.Tests/Ocis.Server.Tests.fsproj" />
+  <Project Path="Ocis.Server/Ocis.Server.fsproj" />
+  <Project Path="Ocis.Tests/Ocis.Tests.fsproj" />
+  <Project Path="Ocis/Ocis.fsproj" />
+</Solution>

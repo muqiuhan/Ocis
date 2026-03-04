@@ -26,22 +26,22 @@ type StatusCode =
 
 /// Request packet
 type RequestPacket =
-  {MagicNumber: uint32
-   Version: byte
-   CommandType: CommandType
-   TotalPacketLength: int32
-   KeyLength: int32
-   ValueLength: int32
-   Key: byte array
-   Value: byte array option}
+  { MagicNumber : uint32
+    Version : byte
+    CommandType : CommandType
+    TotalPacketLength : int32
+    KeyLength : int32
+    ValueLength : int32
+    Key : byte array
+    Value : byte array option }
 
 /// Response packet
 type ResponsePacket =
-  {MagicNumber: uint32
-   Version: byte
-   StatusCode: StatusCode
-   TotalPacketLength: int32
-   ValueLength: int32
-   ErrorMessageLength: int32
-   Value: byte array option
-   ErrorMessage: string option}
+  { MagicNumber : uint32
+    Version : byte
+    StatusCode : StatusCode
+    TotalPacketLength : int32
+    ValueLength : int32
+    ErrorMessageLength : int32
+    Value : byte array option
+    ErrorMessage : string option }

@@ -4,13 +4,13 @@ open NUnit.Framework
 open Ocis.Server.Tests.TestClient
 
 [<TestFixture>]
-type ClientTests() =
+type ClientTests () =
 
   let host = "127.0.0.1"
   let port = 7379
 
   [<Test>]
-  member this.TestClientConnection() =
+  member this.TestClientConnection () =
     let connectionExists = TestClientHelper.testConnection host port
 
     if connectionExists then
@@ -20,9 +20,9 @@ type ClientTests() =
         "No server running on localhost:7379 - connection test skipped"
 
   [<Test>]
-  member this.TestBasicOperations() =
+  member this.TestBasicOperations () =
     // This test is intentionally end-to-end against a live server instance.
-    if not(TestClientHelper.testConnection host port) then
+    if not (TestClientHelper.testConnection host port) then
       Assert.Inconclusive "No server running - skipping client operations test"
     else
       let client = TestClientHelper.createClient host port
@@ -30,13 +30,14 @@ type ClientTests() =
       let key = TestClientHelper.stringToBytes "test_key_client"
       let value = TestClientHelper.stringToBytes "test_value_client"
 
-      match client.Set(key, value) with
+      match client.Set (key, value) with
       | Success _ ->
         match client.Get key with
         | Success retrievedValue ->
           let retrievedString =
             TestClientHelper.bytesToString retrievedValue
-          Assert.That(retrievedString, Is.EqualTo "test_value_client")
+
+          Assert.That (retrievedString, Is.EqualTo "test_value_client")
 
           match client.Delete key with
           | Success _ ->
@@ -52,8 +53,8 @@ type ClientTests() =
       | _ -> Assert.Fail "Unexpected response"
 
   [<Test>]
-  member this.TestGetNonExistentKey() =
-    if not(TestClientHelper.testConnection host port) then
+  member this.TestGetNonExistentKey () =
+    if not (TestClientHelper.testConnection host port) then
       Assert.Inconclusive "No server running - skipping test"
     else
       let client = TestClientHelper.createClient host port
@@ -68,10 +69,10 @@ type ClientTests() =
       | Error msg -> Assert.Fail $"Unexpected error: {msg}"
 
   [<Test>]
-  member this.TestStringHelper() =
+  member this.TestStringHelper () =
     let testString = "Hello, World! 🌍"
     let bytes = TestClientHelper.stringToBytes testString
     let convertedBack = TestClientHelper.bytesToString bytes
 
-    Assert.That(convertedBack, Is.EqualTo testString)
-    Assert.That(bytes.Length, Is.GreaterThan testString.Length) // UTF-8 encoding uses multi-byte characters
+    Assert.That (convertedBack, Is.EqualTo testString)
+    Assert.That (bytes.Length, Is.GreaterThan testString.Length) // UTF-8 encoding uses multi-byte characters

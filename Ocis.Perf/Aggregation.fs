@@ -4,7 +4,7 @@ open System
 
 module Aggregation =
   // Median is robust to outliers across repeated benchmark runs.
-  let private median(values: float list) =
+  let private median (values : float list) =
     let sorted = values |> List.sort |> List.toArray
 
     if sorted.Length = 0 then
@@ -18,10 +18,10 @@ module Aggregation =
         sorted[middle]
 
   // Coefficient of variation captures run-to-run stability.
-  let private coefficientOfVariation(values: float list) =
+  let private coefficientOfVariation (values : float list) =
     match values with
     | []
-    | [_] -> 0.0
+    | [ _ ] -> 0.0
     | _ ->
       let average = values |> List.average
 
@@ -30,35 +30,36 @@ module Aggregation =
       else
         let variance =
           values
-          |> List.averageBy(fun value ->
+          |> List.averageBy (fun value ->
             let delta = value - average
-            delta * delta)
+            delta * delta
+          )
 
         sqrt variance / average
 
-  let summarize(runs: RunSummary list) : AggregateSummary =
+  let summarize (runs : RunSummary list) : AggregateSummary =
     match runs with
     | [] ->
       invalidArg "runs" "At least one run summary is required for aggregation."
     | _ ->
       let throughputs =
         runs
-        |> List.map(fun run -> run.ThroughputOpsPerSec)
+        |> List.map (fun run -> run.ThroughputOpsPerSec)
 
-      {RunCount = runs.Length
-       ThroughputMedianOpsPerSec = median throughputs
-       ThroughputMinOpsPerSec = throughputs |> List.min
-       ThroughputMaxOpsPerSec = throughputs |> List.max
-       ThroughputCoefficientOfVariation = coefficientOfVariation throughputs
-       LatencyP50MedianMs =
+      { RunCount = runs.Length
+        ThroughputMedianOpsPerSec = median throughputs
+        ThroughputMinOpsPerSec = throughputs |> List.min
+        ThroughputMaxOpsPerSec = throughputs |> List.max
+        ThroughputCoefficientOfVariation = coefficientOfVariation throughputs
+        LatencyP50MedianMs =
           runs
-          |> List.map(fun run -> run.Latency.P50Ms)
+          |> List.map (fun run -> run.Latency.P50Ms)
           |> median
-       LatencyP95MedianMs =
+        LatencyP95MedianMs =
           runs
-          |> List.map(fun run -> run.Latency.P95Ms)
+          |> List.map (fun run -> run.Latency.P95Ms)
           |> median
-       LatencyP99MedianMs =
+        LatencyP99MedianMs =
           runs
-          |> List.map(fun run -> run.Latency.P99Ms)
-          |> median}
+          |> List.map (fun run -> run.Latency.P99Ms)
+          |> median }

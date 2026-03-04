@@ -22,10 +22,10 @@ type CompactionPriority =
   | Low // Background compaction
 
 type SSTableCandidate =
-  {SSTable: SSTbl
-   Priority: CompactionPriority
-   OverlapSize: int64
-   Score: float} // Combined score for selection
+  { SSTable : SSTbl
+    Priority : CompactionPriority
+    OverlapSize : int64
+    Score : float } // Combined score for selection
 
 /// <summary>
 /// OcisDB represents the main WiscKey storage engine instance.
@@ -34,17 +34,17 @@ type SSTableCandidate =
 /// </summary>
 type OcisDB
   (
-    dir: string,
-    currentMemtbl: Memtbl,
-    immutableMemtbls: Memtbl list,
-    ssTables: Map<int, SSTbl list>,
-    valog: Valog,
-    wal: Wal,
-    flushThreshold: int,
-    durabilityMode: DurabilityMode,
-    groupCommitWindowMs: int,
-    groupCommitBatchSize: int,
-    durableFlushOverride: (unit -> unit) option
+    dir : string,
+    currentMemtbl : Memtbl,
+    immutableMemtbls : Memtbl list,
+    ssTables : Map<int, SSTbl list>,
+    valog : Valog,
+    wal : Wal,
+    flushThreshold : int,
+    durabilityMode : DurabilityMode,
+    groupCommitWindowMs : int,
+    groupCommitBatchSize : int,
+    durableFlushOverride : (unit -> unit) option
   )
   =
   /// Number of Level 0 SSTables to trigger compaction.
@@ -62,18 +62,20 @@ type OcisDB
   let mutable currentMemtbl = currentMemtbl
   let mutable immutableMemtbls = immutableMemtbls // Changed from immutableMemtbl
   let mutable valog = valog
+
   let mutable internalPendingRemappedLocations =
     Map.empty<int64, int64> // Internal mutable field
-  let writeLock = obj()
-  let threadOwner = ThreadOwner.CaptureOwnerThread()
+
+  let writeLock = obj ()
+  let threadOwner = ThreadOwner.CaptureOwnerThread ()
 
   let durableFlushAction =
     match durableFlushOverride with
     | Some flush -> flush
-    | None -> fun () -> wal.FlushDurable()
+    | None -> fun () -> wal.FlushDurable ()
 
   let walCommitCoordinator =
-    new WalCommitCoordinator(
+    new WalCommitCoordinator (
       durabilityMode,
       groupCommitWindowMs,
       groupCommitBatchSize,
@@ -82,15 +84,15 @@ type OcisDB
 
   static member L0CompactionThreshold
     with get () = L0_COMPACTION_THRESHOLD
-    and set (threshold: int) = L0_COMPACTION_THRESHOLD <- threshold
+    and set (threshold : int) = L0_COMPACTION_THRESHOLD <- threshold
 
   static member LevelSizeMultiplier
     with get () = LEVEL_SIZE_MULTIPLIER
-    and set (multiplier: int) = LEVEL_SIZE_MULTIPLIER <- multiplier
+    and set (multiplier : int) = LEVEL_SIZE_MULTIPLIER <- multiplier
 
   static member CompactionScoreThreshold
     with get () = COMPACTION_SCORE_THRESHOLD
-    and set (threshold: float) = COMPACTION_SCORE_THRESHOLD <- threshold
+    and set (threshold : float) = COMPACTION_SCORE_THRESHOLD <- threshold
 
   /// <summary>
   /// Calculates compaction priority for an SSTable based on multiple factors.
@@ -114,7 +116,7 @@ type OcisDB
   /// <param name="nextLevelSSTables">SSTables in the next level (for overlap calculation)</param>
   /// <returns>The calculated priority level</returns>
   static member private calculateCompactionPriority
-    (sstbl: SSTbl, level: int, nextLevelSSTables: SSTbl list option)
+    (sstbl : SSTbl, level : int, nextLevelSSTables : SSTbl list option)
     : CompactionPriority
     =
     if level = 0 then
@@ -183,13 +185,13 @@ type OcisDB
   /// <param name="nextLevelSSTables">SSTables in the next level for overlap calculation</param>
   /// <returns>A score between 0 and infinity, higher scores indicate higher priority</returns>
   static member private calculateCompactionScore
-    (sstbl: SSTbl, level: int, nextLevelSSTables: SSTbl list option)
+    (sstbl : SSTbl, level : int, nextLevelSSTables : SSTbl list option)
     : float
     =
     // Age score: normalized timestamp (older = lower score)
     let ageScore =
       float sstbl.Timestamp
-      / float(System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+      / float (System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ())
 
     // Size score: SSTable size in MB (larger = higher score)
     let sizeScore = float sstbl.Size / 1024.0 / 1024.0
@@ -238,25 +240,30 @@ type OcisDB
   /// <param name="level">The level to select SSTables from</param>
   /// <returns>List of SSTable candidates sorted by compaction priority</returns>
   static member private selectSSTablesForCompaction
-    (dbRef: OcisDB ref, level: int)
+    (dbRef : OcisDB ref, level : int)
     : SSTableCandidate list
     =
     let currentLevelSSTables =
       dbRef.Value.SSTables |> Map.tryFind level
+
     let nextLevelSSTables =
-      dbRef.Value.SSTables |> Map.tryFind(level + 1)
+      dbRef.Value.SSTables |> Map.tryFind (level + 1)
 
     match currentLevelSSTables with
-    | Some sstables when not(sstables |> List.isEmpty) ->
+    | Some sstables when not (sstables |> List.isEmpty) ->
       Logger.Debug
         $"Evaluating {sstables.Length} SSTables in level {level} for compaction"
 
       let candidates =
         sstables
-        |> List.map(fun sstbl ->
+        |> List.map (fun sstbl ->
           // Calculate compaction priority based on multiple factors
           let priority =
-            OcisDB.calculateCompactionPriority(sstbl, level, nextLevelSSTables)
+            OcisDB.calculateCompactionPriority (
+              sstbl,
+              level,
+              nextLevelSSTables
+            )
 
           // Calculate overlap size for additional context
           let overlapSize =
@@ -270,19 +277,21 @@ type OcisDB
 
           // Calculate comprehensive compaction score
           let score =
-            OcisDB.calculateCompactionScore(sstbl, level, nextLevelSSTables)
+            OcisDB.calculateCompactionScore (sstbl, level, nextLevelSSTables)
 
-          {SSTable = sstbl
-           Priority = priority
-           OverlapSize = overlapSize
-           Score = score})
+          { SSTable = sstbl
+            Priority = priority
+            OverlapSize = overlapSize
+            Score = score }
+        )
 
       // Sort by score (descending), then by priority (High > Medium > Low)
       // This ensures the most beneficial SSTables are compacted first
       let sortedCandidates =
         candidates
-        |> List.sortByDescending(fun candidate ->
-          candidate.Score, candidate.Priority)
+        |> List.sortByDescending (fun candidate ->
+          candidate.Score, candidate.Priority
+        )
 
       Logger.Debug
         $"Selected {sortedCandidates.Length} SSTable candidates for level {level}"
@@ -296,7 +305,7 @@ type OcisDB
   /// Find SSTables that contain remapped value locations for selective recompaction
   /// </summary>
   static member private findSSTablesWithRemappedValues
-    (dbRef: OcisDB ref, remappedLocations: Map<int64, int64>)
+    (dbRef : OcisDB ref, remappedLocations : Map<int64, int64>)
     : SSTbl list
     =
     let remappedValueSet =
@@ -307,49 +316,52 @@ type OcisDB
 
     dbRef.Value.SSTables
     |> Map.toSeq
-    |> Seq.collect(fun (_, sstblList) ->
+    |> Seq.collect (fun (_, sstblList) ->
       sstblList
-      |> List.filter(fun sstbl ->
+      |> List.filter (fun sstbl ->
         sstbl
-        |> Seq.exists(fun (KeyValue(_, valueLoc)) ->
-          remappedValueSet.Contains valueLoc)))
+        |> Seq.exists (fun (KeyValue (_, valueLoc)) ->
+          remappedValueSet.Contains valueLoc
+        )
+      )
+    )
     |> Seq.toList
 
   member _.Dir = dir
 
   member _.CurrentMemtbl
     with get () = currentMemtbl
-    and private set (memtbl: Memtbl) = currentMemtbl <- memtbl
+    and private set (memtbl : Memtbl) = currentMemtbl <- memtbl
 
   member _.ImmutableMemtbls = immutableMemtbls
 
   member _.SSTables
     with get () = ssTables
-    and private set (tables: Map<int, SSTbl list>) = ssTables <- tables
+    and private set (tables : Map<int, SSTbl list>) = ssTables <- tables
 
   member _.ValueLog
     with get () = valog
-    and private set (v: Valog) = valog <- v
+    and private set (v : Valog) = valog <- v
 
   member _.PendingRemappedLocations // New public property for pending remappings
     with get () = internalPendingRemappedLocations
-    and private set (m: Map<int64, int64>) =
+    and private set (m : Map<int64, int64>) =
       internalPendingRemappedLocations <- m
 
   member _.WAL = wal
 
-  member private _.AssertOwnerThread(operationName: string) : unit =
-    threadOwner.AssertOwnerThread(operationName)
+  member private _.AssertOwnerThread (operationName : string) : unit =
+    threadOwner.AssertOwnerThread (operationName)
 
-  member _.BindToCurrentThread() : unit =
-    threadOwner.RebindOwnerThread("OcisDB.BindToCurrentThread")
-    valog.BindToCurrentThread()
+  member _.BindToCurrentThread () : unit =
+    threadOwner.RebindOwnerThread ("OcisDB.BindToCurrentThread")
+    valog.BindToCurrentThread ()
 
   // Implement IDisposable for OcisDB to ensure all underlying resources are properly closed
   interface IDisposable with
-    member this.Dispose() =
+    member this.Dispose () =
       try
-        (walCommitCoordinator :> IDisposable).Dispose()
+        (walCommitCoordinator :> IDisposable).Dispose ()
       with _ ->
         ()
 
@@ -357,19 +369,20 @@ type OcisDB
       // Check if file stream is still open before flushing
       try
         if this.WAL.FileStream.CanWrite then
-          this.WAL.FlushDurable()
+          this.WAL.FlushDurable ()
       with
       | :? System.ObjectDisposedException -> () // Already disposed, skip flush
       | _ -> () // Ignore other errors during disposal
 
       // Close file streams
-      this.ValueLog.Close()
-      this.WAL.Close()
+      this.ValueLog.Close ()
+      this.WAL.Close ()
       // Dispose all SSTables
       this.SSTables
-      |> Map.iter(fun _ sstblList ->
+      |> Map.iter (fun _ sstblList ->
         sstblList
-        |> List.iter(fun sstbl -> (sstbl :> IDisposable).Dispose()))
+        |> List.iter (fun sstbl -> (sstbl :> IDisposable).Dispose ())
+      )
 
   /// <summary>
   /// Merges multiple SSTables into a new SSTable.
@@ -382,10 +395,10 @@ type OcisDB
   /// </summary>
   static member private mergeSSTables
     (
-      dbRef: OcisDB ref,
-      sstblsToMerge: SSTbl list,
-      targetLevel: int,
-      remappedLocations: Map<int64, int64> option
+      dbRef : OcisDB ref,
+      sstblsToMerge : SSTbl list,
+      targetLevel : int,
+      remappedLocations : Map<int64, int64> option
     )
     : Result<SSTbl option * (byte array * ValueLocation) list, string>
     =
@@ -418,7 +431,7 @@ type OcisDB
   /// Memory usage scales with the total size of input SSTables.
   /// </summary>
   static member private collectEntriesFromSSTables
-    (sstblsToMerge: SSTbl list)
+    (sstblsToMerge : SSTbl list)
     : (byte array * ValueLocation * int64) list
     =
     Logger.Debug $"Collecting entries from {sstblsToMerge.Length} SSTables"
@@ -426,22 +439,22 @@ type OcisDB
     // Pre-allocate ResizeArray with estimated capacity to reduce reallocations
     let estimatedCapacity =
       sstblsToMerge
-      |> List.sumBy(fun sstbl -> sstbl.RecordOffsets.Length)
+      |> List.sumBy (fun sstbl -> sstbl.RecordOffsets.Length)
 
     let entries =
-      ResizeArray<(byte array * ValueLocation * int64)>(estimatedCapacity)
+      ResizeArray<(byte array * ValueLocation * int64)> (estimatedCapacity)
 
     // Collect entries using direct iteration to avoid intermediate collections
     for sstbl in sstblsToMerge do
       let timestamp = sstbl.Timestamp
 
       for kvp in sstbl do
-        entries.Add(kvp.Key, kvp.Value, timestamp)
+        entries.Add (kvp.Key, kvp.Value, timestamp)
 
     // Convert to list and sort
     entries
     |> Seq.toList
-    |> List.sortBy(fun (key, _, timestamp) -> key, -timestamp) // Sort by key asc, timestamp desc
+    |> List.sortBy (fun (key, _, timestamp) -> key, -timestamp) // Sort by key asc, timestamp desc
 
   /// <summary>
   /// Step 2: Merges and deduplicates entries based on key and timestamp.
@@ -452,7 +465,7 @@ type OcisDB
   /// Space Complexity: O(K) for processed keys set, where K is the number of unique keys.
   /// </summary>
   static member private mergeAndDeduplicateEntries
-    (allEntries: (byte array * ValueLocation * int64) list)
+    (allEntries : (byte array * ValueLocation * int64) list)
     : (byte array * ValueLocation) list
     =
     Logger.Debug $"Merging and deduplicating {allEntries.Length} entries"
@@ -461,15 +474,16 @@ type OcisDB
     allEntries
     |> List.fold
       (fun
-           (processedKeys: Set<byte array>,
-            mergedEntries: (byte array * ValueLocation) list)
+           (processedKeys : Set<byte array>,
+            mergedEntries : (byte array * ValueLocation) list)
            (key, valueLoc, _) ->
         if processedKeys.Contains key then
           // Key already processed, skip
           (processedKeys, mergedEntries)
         else
           // First occurrence of this key (due to descending timestamp sort)
-          (processedKeys.Add key, (key, valueLoc) :: mergedEntries))
+          (processedKeys.Add key, (key, valueLoc) :: mergedEntries)
+      )
       (Set.empty<byte array>, [])
     |> snd
     |> List.rev // Reverse to maintain key order
@@ -482,8 +496,8 @@ type OcisDB
   /// Deletion markers (-1L) are preserved as they indicate logical deletions.
   /// </summary>
   static member private applyRemappingToEntries
-    (entries: (byte array * ValueLocation) list)
-    (remappedLocations: Map<int64, int64> option)
+    (entries : (byte array * ValueLocation) list)
+    (remappedLocations : Map<int64, int64> option)
     : (byte array * ValueLocation) list
     =
     match remappedLocations with
@@ -491,14 +505,15 @@ type OcisDB
       Logger.Debug $"Applying remapping to {entries.Length} entries"
 
       entries
-      |> List.map(fun (key, valueLoc) ->
+      |> List.map (fun (key, valueLoc) ->
         if valueLoc = -1L then
           // Preserve deletion markers
           (key, valueLoc)
         else
           match remap.TryGetValue valueLoc with
           | true, newLoc -> (key, newLoc)
-          | false, _ -> (key, valueLoc))
+          | false, _ -> (key, valueLoc)
+      )
     | _ -> entries
 
   /// <summary>
@@ -509,45 +524,46 @@ type OcisDB
   /// to reduce memory allocations during the merge process.
   /// </summary>
   static member private createMergedSSTable
-    (dbRef: OcisDB ref)
-    (entries: (byte array * ValueLocation) list)
-    (targetLevel: int)
+    (dbRef : OcisDB ref)
+    (entries : (byte array * ValueLocation) list)
+    (targetLevel : int)
     : Result<SSTbl option * (byte array * ValueLocation) list, string>
     =
     if entries.IsEmpty then
       Logger.Debug "No entries to merge, returning empty result"
-      Ok(None, [])
+      Ok (None, [])
     else
       try
         // Create MemTable for the merged entries
-        let mergedMemtbl = Memtbl()
+        let mergedMemtbl = Memtbl ()
         entries |> List.iter mergedMemtbl.Add
 
         // Generate unique filename for the new SSTable
         let newSSTblPath =
-          Path.Combine(
+          Path.Combine (
             dbRef.Value.Dir,
-            $"sstbl-{Guid.NewGuid().ToString()}.sst"
+            $"sstbl-{Guid.NewGuid().ToString ()}.sst"
           )
 
-        let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ()
 
         Logger.Debug
           $"Flushing {entries.Length} entries to SSTable at level {targetLevel}"
 
         // Flush to disk
         match
-          SSTbl.Flush(mergedMemtbl, newSSTblPath, timestamp, targetLevel)
+          SSTbl.Flush (mergedMemtbl, newSSTblPath, timestamp, targetLevel)
         with
         | Ok flushedSSTblPath ->
           // Open and validate the new SSTable
           match SSTbl.Open flushedSSTblPath with
           | Some newSSTbl ->
             Logger.Debug $"Successfully created merged SSTable: {newSSTbl.Path}"
-            Ok(Some newSSTbl, entries)
+            Ok (Some newSSTbl, entries)
           | None ->
             Logger.Error
               $"Failed to open newly created SSTable: {flushedSSTblPath}"
+
             Error $"Failed to open newly merged SSTable at {flushedSSTblPath}"
         | Error err ->
           Logger.Error $"Failed to flush merged SSTable: {err}"
@@ -558,29 +574,29 @@ type OcisDB
 
   static member private compact
     (
-      dbRef: OcisDB ref,
-      level: int,
-      sstblsToMerge: SSTbl list,
-      targetLevel: int,
-      remappedLocations: Map<int64, int64> option
+      dbRef : OcisDB ref,
+      level : int,
+      sstblsToMerge : SSTbl list,
+      targetLevel : int,
+      remappedLocations : Map<int64, int64> option
     )
     : Result<SSTbl option * (byte array * ValueLocation) list, string>
     =
-    OcisDB.mergeSSTables(dbRef, sstblsToMerge, targetLevel, remappedLocations)
+    OcisDB.mergeSSTables (dbRef, sstblsToMerge, targetLevel, remappedLocations)
 
   /// <summary>
   /// Re-compacts an SSTable by updating its value locations based on a remapping map.
   /// This is used after Valog garbage collection to update outdated value pointers.
   /// </summary>
   static member private recompactSSTable
-    (dbRef: OcisDB ref, sstbl: SSTbl, remappedLocations: Map<int64, int64>)
+    (dbRef : OcisDB ref, sstbl : SSTbl, remappedLocations : Map<int64, int64>)
     : Result<SSTbl option, string>
     =
     try
-      let recompactedMemtbl = Memtbl()
+      let recompactedMemtbl = Memtbl ()
       let mutable changed = false
 
-      for KeyValue(key, originalValueLoc) in sstbl do
+      for KeyValue (key, originalValueLoc) in sstbl do
         let newValueLoc =
           match remappedLocations.TryGetValue originalValueLoc with
           | true, newLoc ->
@@ -588,24 +604,24 @@ type OcisDB
             newLoc
           | false, _ -> originalValueLoc // Value not remapped
 
-        recompactedMemtbl.Add(key, newValueLoc)
+        recompactedMemtbl.Add (key, newValueLoc)
 
       if changed || recompactedMemtbl.Count <> 0 then // Only create new SSTbl if something changed or it's not empty after recompaction
         let newSSTblPath =
-          Path.Combine(
+          Path.Combine (
             dbRef.Value.Dir,
-            $"sstbl-recompact-{Guid.NewGuid().ToString()}.sst"
+            $"sstbl-recompact-{Guid.NewGuid().ToString ()}.sst"
           ) // Use a distinct name
 
-        let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ()
         let level = sstbl.Level // Keep the same level
 
         match
-          SSTbl.Flush(recompactedMemtbl, newSSTblPath, timestamp, level)
+          SSTbl.Flush (recompactedMemtbl, newSSTblPath, timestamp, level)
         with
         | Ok flushedSSTblPath ->
           match SSTbl.Open flushedSSTblPath with
-          | Some newSSTbl -> Ok(Some newSSTbl)
+          | Some newSSTbl -> Ok (Some newSSTbl)
           | None ->
             Error $"Failed to open recompacted SSTable at {flushedSSTblPath}"
         | Error err ->
@@ -619,8 +635,8 @@ type OcisDB
   /// <summary>
   /// Performs optimized compaction for Level 0 SSTables.
   /// </summary>
-  member this.CompactLevel0() : unit =
-    this.AssertOwnerThread("CompactLevel0")
+  member this.CompactLevel0 () : unit =
+    this.AssertOwnerThread ("CompactLevel0")
 
     let level0SSTablesOption = this.SSTables |> Map.tryFind 0
 
@@ -628,17 +644,18 @@ type OcisDB
     | Some level0SSTables when level0SSTables.Length >= L0_COMPACTION_THRESHOLD ->
       // Use intelligent selection for Level 0
       let candidates =
-        OcisDB.selectSSTablesForCompaction((ref this), 0)
+        OcisDB.selectSSTablesForCompaction ((ref this), 0)
 
       // Select top candidates with high priority or score above threshold
       let selectedCandidates =
         candidates
-        |> List.filter(fun c ->
+        |> List.filter (fun c ->
           match c.Priority with
           | High -> true
           | Medium -> c.Score >= COMPACTION_SCORE_THRESHOLD
-          | Low -> false)
-        |> List.truncate(max 2 (level0SSTables.Length / 2)) // Merge at most half of L0 SSTables
+          | Low -> false
+        )
+        |> List.truncate (max 2 (level0SSTables.Length / 2)) // Merge at most half of L0 SSTables
 
       if not selectedCandidates.IsEmpty then
         let sstblsToMerge = selectedCandidates |> List.map _.SSTable
@@ -648,7 +665,7 @@ type OcisDB
           $"Level 0 compaction: Selected {sstblsToMerge.Length} out of {level0SSTables.Length} SSTables for compaction"
 
         match
-          OcisDB.compact(
+          OcisDB.compact (
             (ref this),
             0,
             sstblsToMerge,
@@ -656,8 +673,8 @@ type OcisDB
             Some this.PendingRemappedLocations
           )
         with
-        | Ok(newSSTblOption, liveEntries) ->
-          this.UpdateSSTablesAfterCompaction(newSSTblOption, sstblsToMerge, [])
+        | Ok (newSSTblOption, liveEntries) ->
+          this.UpdateSSTablesAfterCompaction (newSSTblOption, sstblsToMerge, [])
         | Error msg -> Logger.Error $"Error during Level 0 compaction: {msg}"
       else
         Logger.Debug
@@ -669,58 +686,66 @@ type OcisDB
   /// </summary>
   member this.UpdateSSTablesAfterCompaction
     (
-      newSSTblOption: SSTbl option,
-      sstblsToRemoveFromSource: SSTbl list,
-      sstblsToRemoveFromTarget: SSTbl list
+      newSSTblOption : SSTbl option,
+      sstblsToRemoveFromSource : SSTbl list,
+      sstblsToRemoveFromTarget : SSTbl list
     )
     : unit
     =
     let mutable updatedSSTables = this.SSTables
 
     // Remove SSTables from source level
-    if not(sstblsToRemoveFromSource |> List.isEmpty) then
+    if not (sstblsToRemoveFromSource |> List.isEmpty) then
       let sourceLevel = sstblsToRemoveFromSource.Head.Level // Assuming all SSTables in the list are from the same level
 
       updatedSSTables <-
         updatedSSTables
-        |> Map.change sourceLevel (fun currentListOption ->
-          match currentListOption with
-          | Some currentList ->
-            Some(
-              currentList
-              |> List.filter(fun s ->
-                not(
-                  sstblsToRemoveFromSource
-                  |> List.exists(fun oldS -> oldS.Path = s.Path)
-                ))
-            )
-          | None -> None) // If source level list is empty, remove the key from the map
+        |> Map.change
+          sourceLevel
+          (fun currentListOption ->
+            match currentListOption with
+            | Some currentList ->
+              Some (
+                currentList
+                |> List.filter (fun s ->
+                  not (
+                    sstblsToRemoveFromSource
+                    |> List.exists (fun oldS -> oldS.Path = s.Path)
+                  )
+                )
+              )
+            | None -> None
+          ) // If source level list is empty, remove the key from the map
 
     // Remove SSTables from target level (if different from source and not empty)
-    if not(sstblsToRemoveFromTarget |> List.isEmpty) then
+    if not (sstblsToRemoveFromTarget |> List.isEmpty) then
       let targetLevel = sstblsToRemoveFromTarget.Head.Level // Assuming all SSTables in the list are from the same level
 
       if
         Some targetLevel
-        <> if not(sstblsToRemoveFromSource |> List.isEmpty) then
+        <> if not (sstblsToRemoveFromSource |> List.isEmpty) then
              Some sstblsToRemoveFromSource.Head.Level
            else
              None
       then // Only remove from target if it's a different level than source
         updatedSSTables <-
           updatedSSTables
-          |> Map.change targetLevel (fun currentListOption ->
-            match currentListOption with
-            | Some currentList ->
-              Some(
-                currentList
-                |> List.filter(fun s ->
-                  not(
-                    sstblsToRemoveFromTarget
-                    |> List.exists(fun oldS -> oldS.Path = s.Path)
-                  ))
-              )
-            | None -> None) // If target level list is empty, remove the key from the map
+          |> Map.change
+            targetLevel
+            (fun currentListOption ->
+              match currentListOption with
+              | Some currentList ->
+                Some (
+                  currentList
+                  |> List.filter (fun s ->
+                    not (
+                      sstblsToRemoveFromTarget
+                      |> List.exists (fun oldS -> oldS.Path = s.Path)
+                    )
+                  )
+                )
+              | None -> None
+            ) // If target level list is empty, remove the key from the map
 
     match newSSTblOption with
     | Some newSSTbl ->
@@ -728,19 +753,23 @@ type OcisDB
 
       updatedSSTables <-
         updatedSSTables
-        |> Map.change targetLevel (fun currentListOption ->
-          match currentListOption with
-          | Some currentList -> Some(newSSTbl :: currentList)
-          | None -> Some [newSSTbl])
+        |> Map.change
+          targetLevel
+          (fun currentListOption ->
+            match currentListOption with
+            | Some currentList -> Some (newSSTbl :: currentList)
+            | None -> Some [ newSSTbl ]
+          )
     | None -> ()
 
     this.SSTables <- updatedSSTables
 
     (sstblsToRemoveFromSource
      @ sstblsToRemoveFromTarget)
-    |> List.iter(fun sstbl ->
-      (sstbl :> IDisposable).Dispose()
-      File.Delete sstbl.Path)
+    |> List.iter (fun sstbl ->
+      (sstbl :> IDisposable).Dispose ()
+      File.Delete sstbl.Path
+    )
 
     match newSSTblOption with
     | Some newSSTbl ->
@@ -755,14 +784,14 @@ type OcisDB
   /// <summary>
   /// Performs optimized compaction for levels greater than 0.
   /// </summary>
-  member this.CompactLevel(level: int) : unit =
-    this.AssertOwnerThread("CompactLevel")
+  member this.CompactLevel (level : int) : unit =
+    this.AssertOwnerThread ("CompactLevel")
 
     let nextLevel = level + 1
 
     // Use intelligent selection strategy
     let candidates =
-      OcisDB.selectSSTablesForCompaction((ref this), level)
+      OcisDB.selectSSTablesForCompaction ((ref this), level)
 
     if candidates.IsEmpty then
       Logger.Debug $"Level {level}: No SSTables available for compaction"
@@ -770,11 +799,12 @@ type OcisDB
       // Select best candidates for compaction
       let selectedCandidates =
         candidates
-        |> List.filter(fun c ->
+        |> List.filter (fun c ->
           match c.Priority with
           | High -> true
           | Medium -> c.Score >= COMPACTION_SCORE_THRESHOLD
-          | Low -> false)
+          | Low -> false
+        )
         |> List.truncate 3 // Limit to 3 SSTables per compaction to reduce write amplification
 
       if selectedCandidates.IsEmpty then
@@ -782,6 +812,7 @@ type OcisDB
       else
         let currentLevelSSTablesOption =
           this.SSTables |> Map.tryFind level
+
         let nextLevelSSTablesOption =
           this.SSTables |> Map.tryFind nextLevel
 
@@ -797,7 +828,7 @@ type OcisDB
         // Only proceed if level size threshold is exceeded or we have high priority candidates
         let hasHighPriority =
           selectedCandidates
-          |> List.exists(fun c -> c.Priority = High)
+          |> List.exists (fun c -> c.Priority = High)
 
         if
           currentLevelTotalSize >= targetLevelSize
@@ -819,7 +850,7 @@ type OcisDB
               $"Level {level} compaction: Compacting SSTable with score {candidate.Score:F2}, overlap: {candidate.OverlapSize / 1024L / 1024L}MB"
 
             let compactResult =
-              OcisDB.compact(
+              OcisDB.compact (
                 (ref this),
                 level,
                 sstblsToMerge,
@@ -828,10 +859,10 @@ type OcisDB
               )
 
             match compactResult with
-            | Ok(newSSTblOption, _) ->
-              this.UpdateSSTablesAfterCompaction(
+            | Ok (newSSTblOption, _) ->
+              this.UpdateSSTablesAfterCompaction (
                 newSSTblOption,
-                [sstblToCompact],
+                [ sstblToCompact ],
                 overlappingSSTables
               )
             | Error msg ->
@@ -843,11 +874,11 @@ type OcisDB
   /// <summary>
   /// Performs compaction operations in single-threaded mode for maximum performance.
   /// </summary>
-  member this.PerformCompaction() : unit =
-    this.AssertOwnerThread("PerformCompaction")
+  member this.PerformCompaction () : unit =
+    this.AssertOwnerThread ("PerformCompaction")
 
     // Always try Level 0 first (highest priority)
-    this.CompactLevel0()
+    this.CompactLevel0 ()
 
     // Process other levels sequentially
     for level in 1..5 do // Support up to level 5
@@ -857,17 +888,17 @@ type OcisDB
   /// Performs recompaction for remapped value locations.
   /// </summary>
   member this.PerformRecompactionForRemapped
-    (remappedLocations: Map<int64, int64>)
+    (remappedLocations : Map<int64, int64>)
     : unit
     =
-    this.AssertOwnerThread("PerformRecompactionForRemapped")
+    this.AssertOwnerThread ("PerformRecompactionForRemapped")
 
     Logger.Debug
       $"Starting recompaction request for {remappedLocations.Count} remapped locations."
 
     // Selective recompaction: only recompact SSTables that contain remapped values
     let sstablesToRecompact =
-      OcisDB.findSSTablesWithRemappedValues((ref this), remappedLocations)
+      OcisDB.findSSTablesWithRemappedValues ((ref this), remappedLocations)
 
     if sstablesToRecompact.IsEmpty then
       Logger.Debug "No SSTables contain remapped values, skipping recompaction."
@@ -881,25 +912,27 @@ type OcisDB
       // Group SSTables by level for efficient processing
       let sstablesByLevel =
         sstablesToRecompact
-        |> List.groupBy(fun sstbl -> sstbl.Level)
+        |> List.groupBy (fun sstbl -> sstbl.Level)
         |> Map.ofList
 
       // Process each level sequentially
-      for KeyValue(level, levelSSTables) in sstablesByLevel do
+      for KeyValue (level, levelSSTables) in sstablesByLevel do
         let levelSSTablesArray = Array.ofList levelSSTables
+
         let newSSTblArray =
           Array.zeroCreate<SSTbl> levelSSTablesArray.Length
+
         let mutable newSSTblCount = 0
         let mutable levelRecompactedCount = 0
 
         for sstbl in levelSSTablesArray do
           match
-            OcisDB.recompactSSTable((ref this), sstbl, remappedLocations)
+            OcisDB.recompactSSTable ((ref this), sstbl, remappedLocations)
           with
-          | Ok(Some newSSTbl) ->
+          | Ok (Some newSSTbl) ->
             newSSTblArray[newSSTblCount] <- newSSTbl
             newSSTblCount <- newSSTblCount + 1
-            (sstbl :> IDisposable).Dispose()
+            (sstbl :> IDisposable).Dispose ()
             File.Delete sstbl.Path
             levelRecompactedCount <- levelRecompactedCount + 1
 
@@ -932,38 +965,41 @@ type OcisDB
   /// <summary>
   /// Flushes a memtable to SSTable synchronously.
   /// </summary>
-  member this.FlushMemtableToSSTable(memtblToFlush: Memtbl) : unit =
-    this.AssertOwnerThread("FlushMemtableToSSTable")
+  member this.FlushMemtableToSSTable (memtblToFlush : Memtbl) : unit =
+    this.AssertOwnerThread ("FlushMemtableToSSTable")
 
     // Ensure WAL is flushed to disk before flushing memtable to SSTable
     // This guarantees durability: if system crashes, WAL can be replayed to recover data
-    wal.Flush()
+    wal.Flush ()
 
     let newSSTblPath =
-      Path.Combine(this.Dir, $"sstbl-{Guid.NewGuid().ToString()}.sst")
+      Path.Combine (this.Dir, $"sstbl-{Guid.NewGuid().ToString ()}.sst")
 
-    let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    let timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds ()
     let level = 0 // Always flush to Level 0
 
-    match SSTbl.Flush(memtblToFlush, newSSTblPath, timestamp, level) with
+    match SSTbl.Flush (memtblToFlush, newSSTblPath, timestamp, level) with
     | Ok flushedSSTblPath ->
       match SSTbl.Open flushedSSTblPath with
       | Some sstbl ->
         // Update the SSTables map in the OcisDB instance
         this.SSTables <-
           this.SSTables
-          |> Map.change level (fun currentListOption ->
-            match currentListOption with
-            | Some currentList -> Some(sstbl :: currentList)
-            | None -> Some [sstbl])
+          |> Map.change
+            level
+            (fun currentListOption ->
+              match currentListOption with
+              | Some currentList -> Some (sstbl :: currentList)
+              | None -> Some [ sstbl ]
+            )
 
         try
-          wal.Reset()
+          wal.Reset ()
         with ex ->
           Logger.Warn $"WAL reset skipped after checkpoint: {ex.Message}"
 
         // After flushing, trigger compaction if needed
-        this.PerformCompaction()
+        this.PerformCompaction ()
       | None ->
         Logger.Error
           $"Error: Failed to open flushed SSTable at {flushedSSTblPath}"
@@ -981,8 +1017,8 @@ type OcisDB
   /// <summary>
   /// Performs garbage collection synchronously in single-threaded mode.
   /// </summary>
-  member this.PerformGarbageCollection() : unit =
-    this.AssertOwnerThread("PerformGarbageCollection")
+  member this.PerformGarbageCollection () : unit =
+    this.AssertOwnerThread ("PerformGarbageCollection")
 
     Async.RunSynchronously
     <| async {
@@ -991,10 +1027,10 @@ type OcisDB
       try
         // Step 1: Update Valog Tail position using smart strategy
         Logger.Debug "Updating Valog Tail position"
-        this.UpdateValogTail()
+        this.UpdateValogTail ()
 
         // Step 2: Collect all live value locations
-        let liveLocations = OcisDB.GetLiveLocations(ref this)
+        let liveLocations = OcisDB.GetLiveLocations (ref this)
 
         Logger.Info $"Collected {liveLocations.Count} live value locations"
 
@@ -1004,10 +1040,10 @@ type OcisDB
           // Step 3: Perform garbage collection and get remapped offsets
           Logger.Info "Using synchronous garbage collection"
 
-          let! gcResult = Valog.CollectGarbage(this.ValueLog, liveLocations)
+          let! gcResult = Valog.CollectGarbage (this.ValueLog, liveLocations)
 
           match gcResult with
-          | Ok(newValog, remappedLocations) ->
+          | Ok (newValog, remappedLocations) ->
             // Store reference to old valog for disposal
             let oldValog = this.ValueLog
 
@@ -1019,15 +1055,15 @@ type OcisDB
 
             // Dispose the old valog after successful replacement
             try
-              (oldValog :> IDisposable).Dispose()
+              (oldValog :> IDisposable).Dispose ()
               Logger.Debug "Old Valog disposed after successful GC"
             with ex ->
               Logger.Warn $"Error disposing old Valog after GC: {ex.Message}"
 
             // Handle remapped locations
-            for KeyValue(oldLoc, newLoc) in remappedLocations do
+            for KeyValue (oldLoc, newLoc) in remappedLocations do
               this.PendingRemappedLocations <-
-                this.PendingRemappedLocations.Add(oldLoc, newLoc)
+                this.PendingRemappedLocations.Add (oldLoc, newLoc)
 
             // Trigger compaction to update affected SSTables
             this.PerformRecompactionForRemapped remappedLocations
@@ -1066,7 +1102,7 @@ type OcisDB
   /// <param name="dbRef">Reference to the OcisDB instance</param>
   /// <returns>The calculated optimal Tail position</returns>
   static member private CalculateOptimalTailPosition
-    (dbRef: OcisDB ref)
+    (dbRef : OcisDB ref)
     : int64
     =
     try
@@ -1077,7 +1113,7 @@ type OcisDB
       let allSSTables =
         dbRef.Value.SSTables
         |> Map.toSeq
-        |> Seq.collect(fun (_, sstblList) -> sstblList)
+        |> Seq.collect (fun (_, sstblList) -> sstblList)
         |> Seq.toList
 
       if allSSTables.IsEmpty then
@@ -1087,7 +1123,7 @@ type OcisDB
         // Find the oldest SSTable (by timestamp)
         let oldestSSTable =
           allSSTables
-          |> List.minBy(fun sstbl -> sstbl.Timestamp)
+          |> List.minBy (fun sstbl -> sstbl.Timestamp)
 
         Logger.Debug
           $"Oldest SSTable timestamp: {oldestSSTable.Timestamp}, level: {oldestSSTable.Level}"
@@ -1095,8 +1131,8 @@ type OcisDB
         // Find the minimum value location in the oldest SSTable
         let minValueLocation =
           oldestSSTable
-          |> Seq.map(fun (KeyValue(_, valueLoc)) -> valueLoc)
-          |> Seq.filter(fun loc -> loc <> -1L) // Exclude deletion markers
+          |> Seq.map (fun (KeyValue (_, valueLoc)) -> valueLoc)
+          |> Seq.filter (fun loc -> loc <> -1L) // Exclude deletion markers
           |> Seq.min
 
         // Apply safety margin and ensure we don't go below 0
@@ -1119,8 +1155,8 @@ type OcisDB
   /// This function should be called periodically to advance the Tail and allow
   /// more aggressive garbage collection.
   /// </summary>
-  member this.UpdateValogTail() : unit =
-    this.AssertOwnerThread("UpdateValogTail")
+  member this.UpdateValogTail () : unit =
+    this.AssertOwnerThread ("UpdateValogTail")
 
     try
       let currentTail = this.ValueLog.Tail
@@ -1139,7 +1175,8 @@ type OcisDB
         if optimalTail - currentTail > advancementThreshold then
           Logger.Info
             "Significant Tail advancement detected, triggering garbage collection"
-          this.PerformGarbageCollection()
+
+          this.PerformGarbageCollection ()
       else
         Logger.Debug
           $"Tail position unchanged (current: {currentTail}, optimal: {optimalTail})"
@@ -1154,41 +1191,45 @@ type OcisDB
   /// This function is critical for garbage collection efficiency.
   /// We use Set to automatically deduplicate locations and enable fast lookups.
   /// </summary>
-  static member private GetLiveLocations(dbRef: OcisDB ref) : Set<int64> =
+  static member private GetLiveLocations (dbRef : OcisDB ref) : Set<int64> =
     // Helper function to collect live locations from a Memtbl
-    let collectFromMemtbl(memtbl: Memtbl) =
+    let collectFromMemtbl (memtbl : Memtbl) =
       memtbl
-      |> Seq.choose(fun (KeyValue(_, valueLoc)) ->
+      |> Seq.choose (fun (KeyValue (_, valueLoc)) ->
         if valueLoc <> -1L then
           Some valueLoc
         else
-          None)
+          None
+      )
       |> Set.ofSeq
 
     // Collect live locations from all sources
     let locationSets =
       [
-       // From CurrentMemtbl
-       collectFromMemtbl dbRef.Value.CurrentMemtbl
+        // From CurrentMemtbl
+        collectFromMemtbl dbRef.Value.CurrentMemtbl
 
-       // From ImmutableMemtbls
-       yield!
-         dbRef.Value.ImmutableMemtbls
-         |> List.map collectFromMemtbl
+        // From ImmutableMemtbls
+        yield!
+          dbRef.Value.ImmutableMemtbls
+          |> List.map collectFromMemtbl
 
-       // From SSTables
-       dbRef.Value.SSTables
-       |> Map.toSeq
-       |> Seq.collect(fun (_, sstblList) ->
-         sstblList
-         |> Seq.collect(fun sstbl ->
-           sstbl
-           |> Seq.choose(fun (KeyValue(_, valueLoc)) ->
-             if valueLoc <> -1L then
-               Some valueLoc
-             else
-               None)))
-       |> Set.ofSeq ]
+        // From SSTables
+        dbRef.Value.SSTables
+        |> Map.toSeq
+        |> Seq.collect (fun (_, sstblList) ->
+          sstblList
+          |> Seq.collect (fun sstbl ->
+            sstbl
+            |> Seq.choose (fun (KeyValue (_, valueLoc)) ->
+              if valueLoc <> -1L then
+                Some valueLoc
+              else
+                None
+            )
+          )
+        )
+        |> Set.ofSeq ]
 
     let liveLocations = Set.unionMany locationSets
     Logger.Debug $"Collected {liveLocations.Count} live value locations for GC"
@@ -1201,18 +1242,19 @@ type OcisDB
   /// <returns>A Result type: Ok OcisDB instance if successful, otherwise an Error string.</returns>
   static member Open
     (
-      dir: string,
-      flushThreshold: int,
-      ?durabilityMode: string,
-      ?groupCommitWindowMs: int,
-      ?groupCommitBatchSize: int,
-      ?durableFlushOverride: (unit -> unit)
+      dir : string,
+      flushThreshold : int,
+      ?durabilityMode : string,
+      ?groupCommitWindowMs : int,
+      ?groupCommitBatchSize : int,
+      ?durableFlushOverride : (unit -> unit)
     )
     : Result<OcisDB, string>
     =
     try
       let durabilityModeValue = defaultArg durabilityMode "Balanced"
       let groupCommitWindowMsValue = defaultArg groupCommitWindowMs 5
+
       let groupCommitBatchSizeValue =
         defaultArg groupCommitBatchSize 64
 
@@ -1235,11 +1277,11 @@ type OcisDB
           // Ensure the directory exists
           let createDirResult =
             try
-              if not(Directory.Exists dir) then
+              if not (Directory.Exists dir) then
                 Directory.CreateDirectory dir |> ignore
                 Logger.Info $"Created database directory: {dir}"
 
-              Ok()
+              Ok ()
             with
             | :? System.IO.IOException as ioEx ->
               Error
@@ -1249,26 +1291,26 @@ type OcisDB
 
           match createDirResult with
           | Error msg -> Error msg
-          | Ok() ->
+          | Ok () ->
 
             // Create Valog
-            let valogPath = Path.Combine(dir, "valog.vlog")
+            let valogPath = Path.Combine (dir, "valog.vlog")
             Logger.Debug $"Creating Valog at: {valogPath}"
 
             Valog.Create valogPath
-            |> Result.bind(fun valog ->
+            |> Result.bind (fun valog ->
               Logger.Debug "Valog created successfully"
 
               // Create WAL
-              let walPath = Path.Combine(dir, "wal.log")
+              let walPath = Path.Combine (dir, "wal.log")
               Logger.Debug $"Creating WAL at: {walPath}"
 
               Wal.Create walPath
-              |> Result.bind(fun wal ->
+              |> Result.bind (fun wal ->
                 Logger.Debug "WAL created successfully"
 
                 // Replay WAL to reconstruct CurrentMemTable
-                let initialMemtbl = Memtbl()
+                let initialMemtbl = Memtbl ()
                 Logger.Debug "Replaying WAL entries..."
 
                 let replayCount =
@@ -1276,12 +1318,13 @@ type OcisDB
                   |> Seq.fold
                     (fun count entry ->
                       match entry with
-                      | WalEntry.Set(key, valueLoc) ->
-                        initialMemtbl.Add(key, valueLoc)
+                      | WalEntry.Set (key, valueLoc) ->
+                        initialMemtbl.Add (key, valueLoc)
                         count + 1
                       | WalEntry.Delete key ->
                         initialMemtbl.Delete key
-                        count + 1)
+                        count + 1
+                    )
                     0
 
                 Logger.Info
@@ -1293,7 +1336,7 @@ type OcisDB
                 let mutable failedCount = 0
 
                 try
-                  let sstblFiles = Directory.GetFiles(dir, "sstbl-*.sst")
+                  let sstblFiles = Directory.GetFiles (dir, "sstbl-*.sst")
 
                   Logger.Info
                     $"Found {sstblFiles.Length} SSTable files to load"
@@ -1306,10 +1349,14 @@ type OcisDB
                       | Some sstbl ->
                         loadedSSTables <-
                           loadedSSTables
-                          |> Map.change sstbl.Level (fun currentListOption ->
-                            match currentListOption with
-                            | Some currentList -> Some(sstbl :: currentList)
-                            | None -> Some [sstbl])
+                          |> Map.change
+                            sstbl.Level
+                            (fun currentListOption ->
+                              match currentListOption with
+                              | Some currentList ->
+                                Some (sstbl :: currentList)
+                              | None -> Some [ sstbl ]
+                            )
 
                         loadedCount <- loadedCount + 1
 
@@ -1347,7 +1394,7 @@ type OcisDB
                 Logger.Debug "Creating OcisDB instance"
 
                 let ocisDB =
-                  new OcisDB(
+                  new OcisDB (
                     dir,
                     initialMemtbl,
                     [], // Start with empty immutable memtables list
@@ -1366,7 +1413,9 @@ type OcisDB
                 Logger.Info
                   $"OcisDB opened successfully at {dir} with {initialMemtbl.Count} MemTable entries and {loadedCount} SSTables"
 
-                Ok ocisDB))
+                Ok ocisDB
+              )
+            )
     with
     | :? System.IO.PathTooLongException ->
       Error $"Database path too long: '{dir}'"
@@ -1386,11 +1435,11 @@ type OcisDB
   /// <summary>
   /// Ensures Valog is available, reopening it if necessary after GC.
   /// </summary>
-  member private this.EnsureValogAvailable() : Result<unit, string> =
+  member private this.EnsureValogAvailable () : Result<unit, string> =
     try
       // Check if Valog is in an invalid state (null, disposed, or file closed)
       let valogInvalid =
-        obj.ReferenceEquals(this.ValueLog, null)
+        obj.ReferenceEquals (this.ValueLog, null)
         || (try
               // Try to check if the FileStream is closed/disposed
               not this.ValueLog.FileStream.CanRead
@@ -1401,69 +1450,73 @@ type OcisDB
         Logger.Debug
           "Valog is invalid (null or disposed), reopening with retry logic..."
 
-        let valogPath = Path.Combine(this.Dir, "valog.vlog")
+        let valogPath = Path.Combine (this.Dir, "valog.vlog")
 
         // Use a lock to ensure only one thread can recreate Valog
-        lock this (fun () ->
-          // Double-check after acquiring lock
-          let stillInvalid =
-            obj.ReferenceEquals(this.ValueLog, null)
-            || (try
-                  not this.ValueLog.FileStream.CanRead
-                with _ ->
-                  true)
+        lock
+          this
+          (fun () ->
+            // Double-check after acquiring lock
+            let stillInvalid =
+              obj.ReferenceEquals (this.ValueLog, null)
+              || (try
+                    not this.ValueLog.FileStream.CanRead
+                  with _ ->
+                    true)
 
-          if stillInvalid then
-            // Wait for file to become available before attempting to open
-            // This handles cases where file handles haven't been released yet
-            let rec waitForFile attempts =
-              if attempts >= 20 then // Maximum 20 attempts (about 1 second total)
-                Error "File not available after maximum wait time"
-              else
-                try
-                  // Try to open the file with exclusive access to verify it's available
-                  use testStream =
-                    new FileStream(
-                      valogPath,
-                      FileMode.Open,
-                      FileAccess.ReadWrite,
-                      FileShare.None
-                    )
+            if stillInvalid then
+              // Wait for file to become available before attempting to open
+              // This handles cases where file handles haven't been released yet
+              let rec waitForFile attempts =
+                if attempts >= 20 then // Maximum 20 attempts (about 1 second total)
+                  Error "File not available after maximum wait time"
+                else
+                  try
+                    // Try to open the file with exclusive access to verify it's available
+                    use testStream =
+                      new FileStream (
+                        valogPath,
+                        FileMode.Open,
+                        FileAccess.ReadWrite,
+                        FileShare.None
+                      )
 
-                  if testStream.CanRead && testStream.CanWrite then
-                    Ok() // File is available
-                  else
+                    if testStream.CanRead && testStream.CanWrite then
+                      Ok () // File is available
+                    else
+                      System.Threading.Thread.Sleep 50
+                      waitForFile (attempts + 1)
+                  with
+                  | :? IOException ->
+                    // File is still locked, wait and retry
                     System.Threading.Thread.Sleep 50
-                    waitForFile(attempts + 1)
-                with
-                | :? IOException ->
-                  // File is still locked, wait and retry
-                  System.Threading.Thread.Sleep 50
-                  waitForFile(attempts + 1)
-                | ex ->
-                  // Other error, try to open anyway
-                  waitForFile(attempts + 1)
+                    waitForFile (attempts + 1)
+                  | ex ->
+                    // Other error, try to open anyway
+                    waitForFile (attempts + 1)
 
-            // Wait for file to be available
-            match waitForFile 0 with
-            | Ok() ->
-              // File is available, now try to open it
-              match Valog.Create valogPath with
-              | Ok newValog ->
-                this.ValueLog <- newValog
-                Logger.Info "Valog reopened successfully after GC"
-                Ok()
+              // Wait for file to be available
+              match waitForFile 0 with
+              | Ok () ->
+                // File is available, now try to open it
+                match Valog.Create valogPath with
+                | Ok newValog ->
+                  this.ValueLog <- newValog
+                  Logger.Info "Valog reopened successfully after GC"
+                  Ok ()
+                | Error msg ->
+                  Logger.Error
+                    $"Failed to reopen Valog after file became available: {msg}"
+
+                  Error $"Failed to reopen Valog: {msg}"
               | Error msg ->
-                Logger.Error
-                  $"Failed to reopen Valog after file became available: {msg}"
-                Error $"Failed to reopen Valog: {msg}"
-            | Error msg ->
-              Logger.Error $"Valog file not available: {msg}"
-              Error msg
-          else
-            Ok())
+                Logger.Error $"Valog file not available: {msg}"
+                Error msg
+            else
+              Ok ()
+          )
       else
-        Ok()
+        Ok ()
     with ex ->
       Logger.Error $"Error ensuring Valog availability: {ex.Message}"
       Error $"Valog availability check failed: {ex.Message}"
@@ -1475,30 +1528,33 @@ type OcisDB
   /// <param name="value">The value to associate with the key.</param>
   /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
   member this.SetDeferred
-    (key: byte array, value: byte array)
+    (key : byte array, value : byte array)
     : Result<Task<Result<unit, string>>, string>
     =
-    this.AssertOwnerThread("Set")
+    this.AssertOwnerThread ("Set")
 
     try
       // Ensure Valog is available
-      match this.EnsureValogAvailable() with
+      match this.EnsureValogAvailable () with
       | Error msg -> Error msg
-      | Ok() ->
-        lock writeLock (fun () ->
-          // 1. Write to ValueLog
-          let valueLocation = valog.Append(key, value)
+      | Ok () ->
+        lock
+          writeLock
+          (fun () ->
+            // 1. Write to ValueLog
+            let valueLocation = valog.Append (key, value)
 
-          // 2. Write to WAL
-          wal.Append(WalEntry.Set(key, valueLocation))
+            // 2. Write to WAL
+            wal.Append (WalEntry.Set (key, valueLocation))
 
-          // 3. Write to CurrentMemTable
-          currentMemtbl.Add(key, valueLocation)
+            // 3. Write to CurrentMemTable
+            currentMemtbl.Add (key, valueLocation)
 
-          // 4. Check MemTable size and trigger flush if needed
-          this.CheckAndFlushMemtable())
+            // 4. Check MemTable size and trigger flush if needed
+            this.CheckAndFlushMemtable ()
+          )
 
-        Ok(walCommitCoordinator.RegisterDurableCommit())
+        Ok (walCommitCoordinator.RegisterDurableCommit ())
     with ex ->
       Error $"Failed to set key-value pair: {ex.Message}"
 
@@ -1508,24 +1564,27 @@ type OcisDB
   /// <param name="key">The key to set.</param>
   /// <param name="value">The value to associate with the key.</param>
   /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
-  member this.Set(key: byte array, value: byte array) : Result<unit, string> =
-    match this.SetDeferred(key, value) with
+  member this.Set
+    (key : byte array, value : byte array)
+    : Result<unit, string>
+    =
+    match this.SetDeferred (key, value) with
     | Error msg -> Error msg
     | Ok commitTask ->
-      match commitTask.GetAwaiter().GetResult() with
-      | Ok() -> Ok()
+      match commitTask.GetAwaiter().GetResult () with
+      | Ok () -> Ok ()
       | Error msg -> Error $"Failed to set key-value pair: {msg}"
 
   /// <summary>
   /// Helper function to check MemTable size and trigger flush if needed.
   /// </summary>
-  member private this.CheckAndFlushMemtable() : unit =
+  member private this.CheckAndFlushMemtable () : unit =
     let memtblCount = currentMemtbl.Count
 
     if memtblCount >= flushThreshold then
       let frozenMemtbl = currentMemtbl
       immutableMemtbls <- frozenMemtbl :: immutableMemtbls // Add to immutable list
-      currentMemtbl <- Memtbl() // Create a new empty MemTable
+      currentMemtbl <- Memtbl () // Create a new empty MemTable
       this.FlushMemtableToSSTable frozenMemtbl
 
   /// <summary>
@@ -1533,14 +1592,14 @@ type OcisDB
   /// </summary>
   /// <param name="key">The key to retrieve.</param>
   /// <returns>A Result: Ok (Some value) if found, Ok None if not found, otherwise an Error string.</returns>
-  member this.Get(key: byte array) : Result<byte array option, string> =
-    this.AssertOwnerThread("Get")
+  member this.Get (key : byte array) : Result<byte array option, string> =
+    this.AssertOwnerThread ("Get")
 
     try
       // Ensure Valog is available
-      match this.EnsureValogAvailable() with
+      match this.EnsureValogAvailable () with
       | Error msg -> Error msg
-      | Ok() ->
+      | Ok () ->
         let resolveValue = this.ResolveValueLocation // Use the new helper function
 
         // 1. Search CurrentMemTable
@@ -1566,18 +1625,18 @@ type OcisDB
   /// Uses ReadValueOnly to avoid unnecessary key allocation.
   /// </summary>
   member private this.ResolveValueLocation
-    (valueLocation: int64)
+    (valueLocation : int64)
     : Result<byte array option, string>
     =
     if valueLocation = -1L then
       Ok None // Deletion marker
     else
       // Ensure Valog is available before reading
-      match this.EnsureValogAvailable() with
+      match this.EnsureValogAvailable () with
       | Error msg -> Error msg
-      | Ok() ->
+      | Ok () ->
         match this.ValueLog.ReadValueOnly valueLocation with
-        | Some value -> Ok(Some value)
+        | Some value -> Ok (Some value)
         | None ->
           Error $"Failed to read value from Valog at location {valueLocation}."
 
@@ -1585,25 +1644,26 @@ type OcisDB
   /// Helper function to search ImmutableMemTables for a given key.
   /// </summary>
   member private this.SearchImmutableMemtables
-    (key: byte array)
+    (key : byte array)
     : ValueLocation option
     =
     // Search from newest to oldest (list is prepended)
     List.tryPick
-      (fun (memtbl: Memtbl) -> memtbl.TryGet key)
+      (fun (memtbl : Memtbl) -> memtbl.TryGet key)
       this.ImmutableMemtbls
 
   /// <summary>
   /// Helper function to search SSTables for a given key.
   /// </summary>
-  member private this.SearchSSTables(key: byte array) : ValueLocation option =
+  member private this.SearchSSTables (key : byte array) : ValueLocation option =
     this.SSTables
     |> Map.toSeq
     |> Seq.sortBy fst // Sort by level (0, 1, 2...)
-    |> Seq.tryPick(fun (_, sstblList) ->
+    |> Seq.tryPick (fun (_, sstblList) ->
       sstblList
       |> List.sortByDescending _.Timestamp // Search newest first within each level
-      |> List.tryPick(fun sstbl -> sstbl.TryGet key))
+      |> List.tryPick (fun sstbl -> sstbl.TryGet key)
+    )
 
   /// <summary>
   /// Deletes a key from the database.
@@ -1611,27 +1671,30 @@ type OcisDB
   /// <param name="key">The key to delete.</param>
   /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
   member this.DeleteDeferred
-    (key: byte array)
+    (key : byte array)
     : Result<Task<Result<unit, string>>, string>
     =
-    this.AssertOwnerThread("Delete")
+    this.AssertOwnerThread ("Delete")
 
     try
       // Ensure Valog is available
-      match this.EnsureValogAvailable() with
+      match this.EnsureValogAvailable () with
       | Error msg -> Error msg
-      | Ok() ->
-        lock writeLock (fun () ->
-          // 1. Write deletion marker to WAL
-          this.WAL.Append(WalEntry.Delete key)
+      | Ok () ->
+        lock
+          writeLock
+          (fun () ->
+            // 1. Write deletion marker to WAL
+            this.WAL.Append (WalEntry.Delete key)
 
-          // 2. Add deletion marker to CurrentMemTable
-          currentMemtbl.Delete key // Memtbl.Delete already adds -1L
+            // 2. Add deletion marker to CurrentMemTable
+            currentMemtbl.Delete key // Memtbl.Delete already adds -1L
 
-          // 3. Check MemTable size and trigger flush if needed (same logic as Set)
-          this.CheckAndFlushMemtable())
+            // 3. Check MemTable size and trigger flush if needed (same logic as Set)
+            this.CheckAndFlushMemtable ()
+          )
 
-        Ok(walCommitCoordinator.RegisterDurableCommit())
+        Ok (walCommitCoordinator.RegisterDurableCommit ())
     with ex ->
       Error $"Failed to delete key {Encoding.UTF8.GetString key}: {ex.Message}"
 
@@ -1640,11 +1703,11 @@ type OcisDB
   /// </summary>
   /// <param name="key">The key to delete.</param>
   /// <returns>A Result: Ok unit if successful, otherwise an Error string.</returns>
-  member this.Delete(key: byte array) : Result<unit, string> =
+  member this.Delete (key : byte array) : Result<unit, string> =
     match this.DeleteDeferred key with
     | Error msg -> Error msg
     | Ok commitTask ->
-      match commitTask.GetAwaiter().GetResult() with
-      | Ok() -> Ok()
+      match commitTask.GetAwaiter().GetResult () with
+      | Ok () -> Ok ()
       | Error msg ->
         Error $"Failed to delete key {Encoding.UTF8.GetString key}: {msg}"

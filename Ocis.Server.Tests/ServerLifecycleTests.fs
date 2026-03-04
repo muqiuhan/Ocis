@@ -12,154 +12,160 @@ open Ocis.Server.DbDispatcher
 open Ocis.Server.Server
 
 [<TestFixture>]
-type ServerLifecycleTests() =
+type ServerLifecycleTests () =
 
   let testDbDir =
-    Path.Combine(
-      Path.GetTempPath(),
-      $"ocis_server_lifecycle_tests_{Guid.NewGuid():N}"
+    Path.Combine (
+      Path.GetTempPath (),
+      $"ocis_server_lifecycle_tests_{Guid.NewGuid ():N}"
     )
 
   let openDbOrFail dir =
-    match OcisDB.Open(dir, 1000) with
+    match OcisDB.Open (dir, 1000) with
     | Ok opened -> opened
     | Result.Error msg ->
       Assert.Fail $"Failed to open db: {msg}"
       Unchecked.defaultof<OcisDB>
 
-  let tryGetListener(server: TcpServer) =
+  let tryGetListener (server : TcpServer) =
     let flags = BindingFlags.Instance ||| BindingFlags.NonPublic
 
-    typeof<TcpServer>.GetFields(flags)
-    |> Array.tryPick(fun field ->
+    typeof<TcpServer>.GetFields (flags)
+    |> Array.tryPick (fun field ->
       if field.FieldType = typeof<TcpListener option> then
-        match field.GetValue(server) with
+        match field.GetValue (server) with
         | :? (TcpListener option) as listenerOpt -> listenerOpt
         | _ -> None
       else
-        None)
+        None
+    )
 
-  let waitUntilRunningWithListener (server: TcpServer) timeoutMs =
-    let deadline = DateTime.UtcNow.AddMilliseconds(float timeoutMs)
+  let waitUntilRunningWithListener (server : TcpServer) timeoutMs =
+    let deadline = DateTime.UtcNow.AddMilliseconds (float timeoutMs)
 
-    let rec loop() =
+    let rec loop () =
       match server.State, tryGetListener server with
       | ServerState.Running, Some listener -> listener
       | _ when DateTime.UtcNow >= deadline ->
         Assert.Fail
           "Timed out waiting for server to start accepting connections"
+
         Unchecked.defaultof<TcpListener>
       | _ ->
         Thread.Sleep 20
-        loop()
+        loop ()
 
-    loop()
+    loop ()
 
-  let waitForCompletion (task: Task) timeoutMs =
+  let waitForCompletion (task : Task) timeoutMs =
     let completed =
-      Task.WhenAny(task, Task.Delay(timeoutMs: int)).GetAwaiter().GetResult()
+      Task.WhenAny(task, Task.Delay (timeoutMs : int)).GetAwaiter().GetResult ()
 
-    Object.ReferenceEquals(completed, task)
+    Object.ReferenceEquals (completed, task)
 
   [<SetUp>]
-  member _.SetUp() =
-    if not(Directory.Exists testDbDir) then
+  member _.SetUp () =
+    if not (Directory.Exists testDbDir) then
       Directory.CreateDirectory testDbDir |> ignore
 
   [<TearDown>]
-  member _.TearDown() =
+  member _.TearDown () =
     try
       if Directory.Exists testDbDir then
-        Directory.Delete(testDbDir, true)
+        Directory.Delete (testDbDir, true)
     with _ ->
       ()
 
   [<Test>]
-  member _.FatalAcceptLoopExceptionFaultsServerTask() =
+  member _.FatalAcceptLoopExceptionFaultsServerTask () =
     let db = openDbOrFail testDbDir
     use db = db
-    use dispatcher = new OcisDbDispatcher(db, 64)
+    use dispatcher = new OcisDbDispatcher (db, 64)
 
     let server =
-      new TcpServer(
-        {Host = "127.0.0.1"
-         Port = 0
-         MaxConnections = 8
-         ReceiveTimeout = 2000
-         SendTimeout = 2000},
+      new TcpServer (
+        { Host = "127.0.0.1"
+          Port = 0
+          MaxConnections = 8
+          ReceiveTimeout = 2000
+          SendTimeout = 2000 },
         dispatcher
       )
 
     use serverDisposable = server :> IDisposable
 
-    let startTask = server.StartAsync() |> Async.StartAsTask
+    let startTask = server.StartAsync () |> Async.StartAsTask
 
     try
       let listener = waitUntilRunningWithListener server 2000
-      listener.Stop()
+      listener.Stop ()
 
       let completedInTime = waitForCompletion startTask 2000
-      Assert.That(
+
+      Assert.That (
         completedInTime,
         Is.True,
         "Expected StartAsync task to fault after fatal accept-loop exception"
       )
-      Assert.That(
+
+      Assert.That (
         startTask.IsFaulted,
         Is.True,
         "Expected StartAsync task to fault"
       )
 
       match server.State with
-      | ServerState.Error _ -> Assert.Pass()
+      | ServerState.Error _ -> Assert.Pass ()
       | other -> Assert.Fail $"Expected Error state, got {other}"
     finally
       try
-        server.StopAsync() |> Async.RunSynchronously
+        server.StopAsync () |> Async.RunSynchronously
       with _ ->
         ()
 
   [<Test>]
-  member _.StopAsyncCleansUpWhenStateIsError() =
+  member _.StopAsyncCleansUpWhenStateIsError () =
     let db = openDbOrFail testDbDir
     use db = db
-    use dispatcher = new OcisDbDispatcher(db, 64)
+    use dispatcher = new OcisDbDispatcher (db, 64)
 
     let server =
-      new TcpServer(
-        {Host = "127.0.0.1"
-         Port = 0
-         MaxConnections = 8
-         ReceiveTimeout = 2000
-         SendTimeout = 2000},
+      new TcpServer (
+        { Host = "127.0.0.1"
+          Port = 0
+          MaxConnections = 8
+          ReceiveTimeout = 2000
+          SendTimeout = 2000 },
         dispatcher
       )
 
     use serverDisposable = server :> IDisposable
 
-    let startTask = server.StartAsync() |> Async.StartAsTask
+    let startTask = server.StartAsync () |> Async.StartAsTask
 
     try
       let listener = waitUntilRunningWithListener server 2000
-      listener.Stop()
+      listener.Stop ()
 
       let completedInTime = waitForCompletion startTask 2000
-      Assert.That(
+
+      Assert.That (
         completedInTime,
         Is.True,
         "Expected StartAsync task to complete after listener failure"
       )
-      Assert.That(
+
+      Assert.That (
         startTask.IsFaulted,
         Is.True,
         "Expected StartAsync task to fault"
       )
 
-      server.StopAsync() |> Async.RunSynchronously
+      server.StopAsync () |> Async.RunSynchronously
 
-      Assert.That(server.State, Is.EqualTo ServerState.Stopped)
+      Assert.That (server.State, Is.EqualTo ServerState.Stopped)
     finally
       try
-        server.StopAsync() |> Async.RunSynchronously
+        server.StopAsync () |> Async.RunSynchronously
       with _ ->
         ()

@@ -18,19 +18,19 @@ open Ocis.Errors
 ///
 /// Single-threaded: Optimized for single-threaded operation with maximum performance.
 /// </remarks>
-type Memtbl() =
+type Memtbl () =
   let memtbl =
     SortedDictionary<byte array, ValueLocation>
       ByteArrayComparer.ComparerInstance
 
   interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
-    member _.GetEnumerator() =
-      memtbl.GetEnumerator()
+    member _.GetEnumerator () =
+      memtbl.GetEnumerator ()
       :> IEnumerator<KeyValuePair<byte array, ValueLocation>>
 
   interface Collections.IEnumerable with
-    member _.GetEnumerator() =
-      memtbl.GetEnumerator() :> Collections.IEnumerator
+    member _.GetEnumerator () =
+      memtbl.GetEnumerator () :> Collections.IEnumerator
 
   member _.Count = memtbl.Count
 
@@ -40,7 +40,7 @@ type Memtbl() =
   /// </summary>
   /// <param name="key">The key to add or update.</param>
   /// <param name="valueLocation">The value location to associate with the key.</param>
-  member _.Add(key: byte array, valueLocation: ValueLocation) : unit =
+  member _.Add (key : byte array, valueLocation : ValueLocation) : unit =
     memtbl[key] <- valueLocation
 
   /// <summary>
@@ -52,7 +52,7 @@ type Memtbl() =
   /// An Option type: Some ValueLocation if the key is found, otherwise None.
   /// This follows the idiomatic way of handling possible missing values in F#.
   /// </returns>
-  member _.TryGet(key: byte array) : ValueLocation option =
+  member _.TryGet (key : byte array) : ValueLocation option =
     match memtbl.TryGetValue key with
     | true, value -> Some value
     | false, _ -> None
@@ -66,22 +66,22 @@ type Memtbl() =
   /// </summary>
   /// <param name="key">The key to delete.</param>
   /// <returns>A Result: Ok unit if successful, otherwise an Error OcisError.</returns>
-  member this.SafeDelete(key: byte array) : Result<unit, OcisError> =
+  member this.SafeDelete (key : byte array) : Result<unit, OcisError> =
     match this.TryGet key with
     | Some _ ->
       match memtbl.Remove key with
       | true ->
-        memtbl.Add(key, -1L)
-        Ok()
+        memtbl.Add (key, -1L)
+        Ok ()
       | false ->
-        Error(
-          DeleteOperationFailed(key, "Failed to remove key from dictionary")
+        Error (
+          DeleteOperationFailed (key, "Failed to remove key from dictionary")
         )
-    | None -> Error(KeyNotFound key)
+    | None -> Error (KeyNotFound key)
 
   /// <summary>
   /// Delete a key from Memtbl.
   /// Single-threaded implementation optimized for performance.
   /// </summary>
   /// <param name="key">The key to delete.</param>
-  member _.Delete(key: byte array) : unit = memtbl[key] <- -1L
+  member _.Delete (key : byte array) : unit = memtbl[key] <- -1L

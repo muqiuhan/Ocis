@@ -1,78 +1,78 @@
 module Ocis.Server.Config
 
 type OcisConfig =
-  {Dir: string
-   FlushThreshold: int
-   L0CompactionThreshold: int
-   LevelSizeMultiplier: int
-   LogLevel: string
-   DurabilityMode: string
-   GroupCommitWindowMs: int
-   GroupCommitBatchSize: int
-   DbQueueCapacity: int
-   CheckpointMinIntervalMs: int
+  { Dir : string
+    FlushThreshold : int
+    L0CompactionThreshold : int
+    LevelSizeMultiplier : int
+    LogLevel : string
+    DurabilityMode : string
+    GroupCommitWindowMs : int
+    GroupCommitBatchSize : int
+    DbQueueCapacity : int
+    CheckpointMinIntervalMs : int
 
-   Host: string
-   Port: int
-   MaxConnections: int
-   ReceiveTimeout: int
-   SendTimeout: int}
+    Host : string
+    Port : int
+    MaxConnections : int
+    ReceiveTimeout : int
+    SendTimeout : int }
 
 module ConfigHelper =
 
   // Baseline defaults for server and storage runtime.
-  let CreateDefault(dir: string) =
-    {Dir = dir
-     FlushThreshold = 1000
-     L0CompactionThreshold = 4
-     LevelSizeMultiplier = 5
-     LogLevel = "Info"
-     DurabilityMode = "Balanced"
-     GroupCommitWindowMs = 5
-     GroupCommitBatchSize = 64
-     DbQueueCapacity = 8192
-     CheckpointMinIntervalMs = 30000
+  let CreateDefault (dir : string) =
+    { Dir = dir
+      FlushThreshold = 1000
+      L0CompactionThreshold = 4
+      LevelSizeMultiplier = 5
+      LogLevel = "Info"
+      DurabilityMode = "Balanced"
+      GroupCommitWindowMs = 5
+      GroupCommitBatchSize = 64
+      DbQueueCapacity = 8192
+      CheckpointMinIntervalMs = 30000
 
-     Host = "0.0.0.0"
-     Port = 7379
-     MaxConnections = 1000
-     ReceiveTimeout = 30000 // 30 seconds
-     SendTimeout = 30000 // 30 seconds
+      Host = "0.0.0.0"
+      Port = 7379
+      MaxConnections = 1000
+      ReceiveTimeout = 30000 // 30 seconds
+      SendTimeout = 30000 // 30 seconds
     }
 
   // Validate user-provided configuration before runtime initialization.
-  let ValidateConfig(config: OcisConfig) : Result<unit, string> =
-    let validatePort() =
+  let ValidateConfig (config : OcisConfig) : Result<unit, string> =
+    let validatePort () =
       if config.Port <= 0 || config.Port > 65535 then
         Error "Port must be between 1 and 65535"
       else
-        Ok()
+        Ok ()
 
-    let validateMaxConnections() =
+    let validateMaxConnections () =
       if config.MaxConnections <= 0 then
         Error "MaxConnections must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateFlushThreshold() =
+    let validateFlushThreshold () =
       if config.FlushThreshold <= 0 then
         Error "FlushThreshold must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateL0CompactionThreshold() =
+    let validateL0CompactionThreshold () =
       if config.L0CompactionThreshold <= 0 then
         Error "L0CompactionThreshold must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateLevelSizeMultiplier() =
+    let validateLevelSizeMultiplier () =
       if config.LevelSizeMultiplier <= 0 then
         Error "LevelSizeMultiplier must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateLogLevel() =
+    let validateLogLevel () =
       if
         config.LogLevel <> "Debug"
         && config.LogLevel <> "Info"
@@ -82,9 +82,9 @@ module ConfigHelper =
       then
         Error "LogLevel must be one of: Debug, Info, Warn, Error, Fatal"
       else
-        Ok()
+        Ok ()
 
-    let validateDurabilityMode() =
+    let validateDurabilityMode () =
       if
         config.DurabilityMode <> "Strict"
         && config.DurabilityMode <> "Balanced"
@@ -92,61 +92,61 @@ module ConfigHelper =
       then
         Error "DurabilityMode must be one of: Strict, Balanced, Fast"
       else
-        Ok()
+        Ok ()
 
-    let validateGroupCommitWindowMs() =
+    let validateGroupCommitWindowMs () =
       if config.GroupCommitWindowMs <= 0 then
         Error "GroupCommitWindowMs must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateGroupCommitBatchSize() =
+    let validateGroupCommitBatchSize () =
       if config.GroupCommitBatchSize <= 0 then
         Error "GroupCommitBatchSize must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateDbQueueCapacity() =
+    let validateDbQueueCapacity () =
       if config.DbQueueCapacity <= 0 then
         Error "DbQueueCapacity must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateCheckpointMinIntervalMs() =
+    let validateCheckpointMinIntervalMs () =
       if config.CheckpointMinIntervalMs <= 0 then
         Error "CheckpointMinIntervalMs must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateReceiveTimeout() =
+    let validateReceiveTimeout () =
       if config.ReceiveTimeout <= 0 then
         Error "ReceiveTimeout must be greater than 0"
       else
-        Ok()
+        Ok ()
 
-    let validateSendTimeout() =
+    let validateSendTimeout () =
       if config.SendTimeout <= 0 then
         Error "SendTimeout must be greater than 0"
       else
-        Ok()
+        Ok ()
 
     let results =
-      [validatePort
-       validateMaxConnections
-       validateFlushThreshold
-       validateL0CompactionThreshold
-       validateLevelSizeMultiplier
-       validateLogLevel
-       validateDurabilityMode
-       validateGroupCommitWindowMs
-       validateGroupCommitBatchSize
-       validateDbQueueCapacity
-       validateCheckpointMinIntervalMs
-       validateReceiveTimeout
-       validateSendTimeout ]
-      |> List.map(fun v -> v())
+      [ validatePort
+        validateMaxConnections
+        validateFlushThreshold
+        validateL0CompactionThreshold
+        validateLevelSizeMultiplier
+        validateLogLevel
+        validateDurabilityMode
+        validateGroupCommitWindowMs
+        validateGroupCommitBatchSize
+        validateDbQueueCapacity
+        validateCheckpointMinIntervalMs
+        validateReceiveTimeout
+        validateSendTimeout ]
+      |> List.map (fun v -> v ())
       |> List.filter Result.isError
 
     match results with
-    | [] -> Ok()
+    | [] -> Ok ()
     | errors -> errors.Head

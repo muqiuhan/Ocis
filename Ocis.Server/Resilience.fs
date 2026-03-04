@@ -3,7 +3,7 @@ module Ocis.Server.Resilience
 open System
 open System.Net.Sockets
 
-let isTransientSocketError(socketError: SocketError) =
+let isTransientSocketError (socketError : SocketError) =
   match socketError with
   | SocketError.TimedOut
   | SocketError.WouldBlock
@@ -12,7 +12,7 @@ let isTransientSocketError(socketError: SocketError) =
   | SocketError.NoBufferSpaceAvailable -> true
   | _ -> false
 
-let isTransientAcceptException(ex: exn) =
+let isTransientAcceptException (ex : exn) =
   match ex with
   | :? SocketException as socketEx ->
     isTransientSocketError socketEx.SocketErrorCode
@@ -20,9 +20,9 @@ let isTransientAcceptException(ex: exn) =
 
 // Exponential backoff with cap and overflow protection.
 let computeBoundedRetryDelayMs
-  (attempt: int)
-  (baseDelayMs: int)
-  (maxDelayMs: int)
+  (attempt : int)
+  (baseDelayMs : int)
+  (maxDelayMs : int)
   =
   let safeAttempt = max 0 attempt
   let effectiveBaseDelay = max 0 baseDelayMs
@@ -48,4 +48,4 @@ let computeBoundedRetryDelayMs
 
   let multiplier = boundedPow2 1L safeAttempt
   let delay = int64 effectiveBaseDelay * multiplier
-  min effectiveMaxDelay (int(min delay (int64 Int32.MaxValue)))
+  min effectiveMaxDelay (int (min delay (int64 Int32.MaxValue)))

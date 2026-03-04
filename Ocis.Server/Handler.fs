@@ -10,22 +10,23 @@ open System.Diagnostics
 module RequestHandler =
 
   let handleSet
-    (dispatcher: OcisDbDispatcher)
-    (request: RequestPacket)
-    (value: byte array)
+    (dispatcher : OcisDbDispatcher)
+    (request : RequestPacket)
+    (value : byte array)
     : Async<ResponsePacket>
     =
     async {
-      let! queued = dispatcher.DispatchSetDeferred(request.Key, value)
+      let! queued = dispatcher.DispatchSetDeferred (request.Key, value)
 
       match queued with
       | Ok commitTask ->
         let! result = commitTask |> Async.AwaitTask
 
         match result with
-        | Ok() ->
+        | Ok () ->
           Logger.Debug
             $"SET success: key length={request.Key.Length}, value length={value.Length}"
+
           return Protocol.CreateSuccessResponse None
         | Error msg ->
           Logger.Error $"SET failed: {msg}"
@@ -36,29 +37,30 @@ module RequestHandler =
     }
 
   let handleGet
-    (dispatcher: OcisDbDispatcher)
-    (request: RequestPacket)
+    (dispatcher : OcisDbDispatcher)
+    (request : RequestPacket)
     : Async<ResponsePacket>
     =
     async {
       let! result = dispatcher.DispatchGet request.Key
 
       match result with
-      | Ok(Some value) ->
+      | Ok (Some value) ->
         Logger.Debug
           $"GET success: key length={request.Key.Length}, value length={value.Length}"
-        return Protocol.CreateSuccessResponse(Some value)
+
+        return Protocol.CreateSuccessResponse (Some value)
       | Ok None ->
         Logger.Debug $"GET not found: key length={request.Key.Length}"
-        return Protocol.CreateNotFoundResponse()
+        return Protocol.CreateNotFoundResponse ()
       | Error msg ->
         Logger.Error $"GET failed: {msg}"
         return Protocol.CreateErrorResponse msg
     }
 
   let handleDelete
-    (dispatcher: OcisDbDispatcher)
-    (request: RequestPacket)
+    (dispatcher : OcisDbDispatcher)
+    (request : RequestPacket)
     : Async<ResponsePacket>
     =
     async {
@@ -69,7 +71,7 @@ module RequestHandler =
         let! result = commitTask |> Async.AwaitTask
 
         match result with
-        | Ok() ->
+        | Ok () ->
           Logger.Debug $"DELETE success: key length={request.Key.Length}"
           return Protocol.CreateSuccessResponse None
         | Error msg ->
@@ -80,9 +82,10 @@ module RequestHandler =
         return Protocol.CreateErrorResponse msg
     }
 
-  let handleUnknown(request: RequestPacket) : ResponsePacket =
+  let handleUnknown (request : RequestPacket) : ResponsePacket =
     let errorMsg =
       $"Unknown command type: {int request.CommandType}"
+
     Logger.Error errorMsg
     Protocol.CreateErrorResponse errorMsg
 
@@ -90,8 +93,8 @@ module RequestHandler =
   /// For write commands we enqueue work first and await commit completion
   /// outside the dispatcher thread to avoid head-of-line blocking.
   let HandleRequest
-    (dispatcher: OcisDbDispatcher)
-    (request: RequestPacket)
+    (dispatcher : OcisDbDispatcher)
+    (request : RequestPacket)
     : Async<ResponsePacket>
     =
     async {
@@ -109,15 +112,16 @@ module RequestHandler =
       with ex ->
         let errorMsg =
           $"Unexpected error handling request: {ex.Message}"
+
         Logger.Error errorMsg
         return Protocol.CreateErrorResponse errorMsg
     }
 
   /// Validate protocol-level boundaries before dispatching to storage.
   /// These checks protect against malformed frames and oversized payloads.
-  let ValidateRequest(request: RequestPacket) : Result<unit, string> =
+  let ValidateRequest (request : RequestPacket) : Result<unit, string> =
     // Validate packet size
-    if not(Protocol.IsValidPacketSize request.TotalPacketLength) then
+    if not (Protocol.IsValidPacketSize request.TotalPacketLength) then
       Error "Invalid packet size"
     // Validate key length
     elif
@@ -148,29 +152,31 @@ module RequestHandler =
         Error "Value length mismatch"
       | None when request.ValueLength > 0 ->
         Error "Missing value for SET command"
-      | _ -> Ok()
+      | _ -> Ok ()
     else
-      Ok()
+      Ok ()
 
   /// End-to-end request processing with telemetry emission.
   let ProcessValidRequest
-    (dispatcher: OcisDbDispatcher)
-    (request: RequestPacket)
+    (dispatcher : OcisDbDispatcher)
+    (request : RequestPacket)
     : Async<ResponsePacket>
     =
     async {
-      let startTimestamp = Stopwatch.GetTimestamp()
+      let startTimestamp = Stopwatch.GetTimestamp ()
 
-      let! response = async {
-        match ValidateRequest request with
-        | Ok() -> return! HandleRequest dispatcher request
-        | Error msg ->
-          Logger.Warn $"Invalid request: {msg}"
-          return Protocol.CreateErrorResponse msg
-      }
+      let! response =
+        async {
+          match ValidateRequest request with
+          | Ok () -> return! HandleRequest dispatcher request
+          | Error msg ->
+            Logger.Warn $"Invalid request: {msg}"
+            return Protocol.CreateErrorResponse msg
+        }
 
       let durationMs =
         Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds
+
       RecordRequest response.StatusCode durationMs
       return response
     }
