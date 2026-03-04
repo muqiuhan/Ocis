@@ -44,3 +44,21 @@ jobs:
         run: dotnet test --no-restore --verbosity normal --settings test.fast.runsettings
       - name: Crash recovery gate
         run: dotnet test Ocis.Tests/Ocis.Tests.fsproj --no-restore --no-build --verbosity normal --filter "TestCategory=CrashRecovery"
+
+  generate-sdk:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0'
+      - name: Install fable
+        run: dotnet tool install -g fable
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      - name: Build and test Ocis.Client.SDK
+        run: cd Ocis.Client && dotnet build -c Release && dotnet test
+      - name: Generate SDK
+        run: cd Ocis.Client && ./generate-sdk.sh
