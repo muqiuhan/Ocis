@@ -22,14 +22,17 @@ type Wal (path : string, fileStream : FileStream) =
   let path : string = path
   let fileStream : FileStream = fileStream
   let writer = new BinaryWriter (fileStream, System.Text.Encoding.UTF8, true)
+  let mutable disposed = false
 
   member _.Path = path
   member _.FileStream = fileStream
 
   interface IDisposable with
     member _.Dispose () =
-      writer.Dispose ()
-      fileStream.Dispose ()
+      if not disposed then
+        disposed <- true
+        writer.Dispose ()
+        fileStream.Dispose ()
 
   /// <summary>
   /// Opens or creates a WAL file.
