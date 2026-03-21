@@ -163,7 +163,7 @@ type Wal (path : string, fileStream : FileStream) =
   /// Closes the WAL file stream.
   /// It is recommended to use the 'use' keyword with the Wal type, as it implements IDisposable.
   /// </summary>
-  member _.Close () : unit = fileStream.Close ()
+  member this.Close () : unit = (this :> IDisposable).Dispose ()
 
   /// <summary>
   /// Explicitly dispose the WAL.
