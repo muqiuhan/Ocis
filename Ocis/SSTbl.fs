@@ -63,26 +63,17 @@ type SSTbl
       this.Reader.Dispose ()
       this.FileStream.Dispose ()
 
-  // Implement IEnumerable<KeyValuePair<byte array, ValueLocation>>
   interface IEnumerable<KeyValuePair<byte array, ValueLocation>> with
     member this.GetEnumerator () =
-      // Helper function to read a key-value pair from the stream at a given offset
       let readKeyValuePair
         (stream : FileStream, reader : BinaryReader, offset : int64)
         : KeyValuePair<byte array, ValueLocation>
         =
-        lock
-          stream
-          (fun () ->
-            stream.Seek (offset, SeekOrigin.Begin) |> ignore
-            // Use BinaryReader to read data. The last parameter 'true' of the constructor means that the underlying file stream (valog.FileStream) will not be closed after the BinaryReader is disposed.
+        stream.Seek (offset, SeekOrigin.Begin) |> ignore
+        let key = Serialization.readByteArray reader
+        let valueLocation = Serialization.readValueLocation reader
+        KeyValuePair<byte array, ValueLocation> (key, valueLocation)
 
-            let key = Serialization.readByteArray reader
-            let valueLocation = Serialization.readValueLocation reader
-            KeyValuePair<byte array, ValueLocation> (key, valueLocation)
-          )
-
-      // Create an enumerator that reads key-value pairs from the SSTable file
       (seq {
         for offset in this.RecordOffsets do
           yield readKeyValuePair (this.FileStream, this.Reader, offset)
