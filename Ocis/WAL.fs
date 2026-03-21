@@ -71,6 +71,8 @@ type Wal (path : string, fileStream : FileStream) =
         | WalEntry.Delete key ->
           writer.Write 1uy
           Serialization.writeByteArray writer key
+
+        writer.Flush ()
       )
 
   /// <summary>
