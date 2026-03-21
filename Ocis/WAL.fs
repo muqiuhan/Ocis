@@ -21,13 +21,15 @@ type Wal (path : string, fileStream : FileStream) =
 
   let path : string = path
   let fileStream : FileStream = fileStream
+  let writer = new BinaryWriter (fileStream, System.Text.Encoding.UTF8, true)
 
   member _.Path = path
   member _.FileStream = fileStream
 
-  // Implements IDisposable to ensure the FileStream is properly closed
   interface IDisposable with
-    member this.Dispose () = this.FileStream.Dispose ()
+    member _.Dispose () =
+      writer.Dispose ()
+      fileStream.Dispose ()
 
   /// <summary>
   /// Opens or creates a WAL file.
@@ -58,19 +60,14 @@ type Wal (path : string, fileStream : FileStream) =
     lock
       fileStream
       (fun () ->
-        use writer =
-          new BinaryWriter (fileStream, System.Text.Encoding.UTF8, true) // true means the underlying stream will not be closed
-
         match entry with
         | WalEntry.Set (key, valueLocation) ->
-          writer.Write 0uy // 0 indicates Set type
+          writer.Write 0uy
           Serialization.writeByteArray writer key
           Serialization.writeValueLocation writer valueLocation
         | WalEntry.Delete key ->
-          writer.Write 1uy // 1 indicates Delete type
+          writer.Write 1uy
           Serialization.writeByteArray writer key
-
-      // fileStream.Flush() // Ensure data is written to disk (Moved to OcisDB for batched flushing)
       )
 
   /// <summary>
